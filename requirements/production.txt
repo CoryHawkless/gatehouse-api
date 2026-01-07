@@ -1,0 +1,10 @@
+-r base.txt
+
+# Production WSGI server
+gunicorn==21.2.0
+
+# Monitoring & logging
+sentry-sdk[flask]==1.39.1
+
+# Performance
+gevent==23.9.1
