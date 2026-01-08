@@ -1,12 +1,13 @@
 """Development environment configuration."""
 from config.base import BaseConfig
-
+import os
 
 class DevelopmentConfig(BaseConfig):
     """Development configuration."""
 
     DEBUG = True
-    SQLALCHEMY_ECHO = True
+    # Use environment variable like BaseConfig does
+    SQLALCHEMY_ECHO = os.getenv("SQLALCHEMY_ECHO", "False").lower() == "true"
     SESSION_COOKIE_SECURE = False
 
     # More verbose logging in development

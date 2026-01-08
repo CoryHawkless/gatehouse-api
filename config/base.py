@@ -17,6 +17,7 @@ class BaseConfig:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ECHO = os.getenv("SQLALCHEMY_ECHO", "False").lower() == "true"
+    SQLALCHEMY_LOG_LEVEL = os.getenv("SQLALCHEMY_LOG_LEVEL", "WARNING")
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,
         "pool_recycle": 300,
@@ -47,9 +48,12 @@ class BaseConfig:
 
     # Redis
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-    # Flask session configuration - deprecated, migrating to Bearer token authentication
-    # SESSION_TYPE = "redis"
-    # SESSION_REDIS = None  # Will be set at app initialization
+    
+    # Flask Session configuration
+    SESSION_TYPE = os.getenv("SESSION_TYPE", "filesystem")
+    SESSION_FILE_DIR = os.getenv("SESSION_FILE_DIR", "/tmp/flask_session")
+    SESSION_FILE_THRESHOLD = int(os.getenv("SESSION_FILE_THRESHOLD", "500"))
+    SESSION_REDIS = None  # Will be set at app initialization
 
     # Rate Limiting
     RATELIMIT_ENABLED = os.getenv("RATELIMIT_ENABLED", "True").lower() == "true"
@@ -60,8 +64,30 @@ class BaseConfig:
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_TO_STDOUT = os.getenv("LOG_TO_STDOUT", "False").lower() == "true"
 
-    # OIDC
+    # OIDC Configuration
     OIDC_ISSUER_URL = os.getenv("OIDC_ISSUER_URL", "http://localhost:5000")
+    OIDC_BASE_URL = os.getenv("OIDC_BASE_URL", OIDC_ISSUER_URL)
+    
+    # Token lifetimes
+    OIDC_ACCESS_TOKEN_LIFETIME = int(os.getenv("OIDC_ACCESS_TOKEN_LIFETIME", "3600"))
+    OIDC_REFRESH_TOKEN_LIFETIME = int(os.getenv("OIDC_REFRESH_TOKEN_LIFETIME", "2592000"))
+    OIDC_ID_TOKEN_LIFETIME = int(os.getenv("OIDC_ID_TOKEN_LIFETIME", "3600"))
+    OIDC_AUTHORIZATION_CODE_LIFETIME = int(os.getenv("OIDC_AUTHORIZATION_CODE_LIFETIME", "600"))
+    
+    # Security settings
+    OIDC_REQUIRE_PKCE = os.getenv("OIDC_REQUIRE_PKCE", "True").lower() == "true"
+    OIDC_ALLOW_IMPLICIT_FLOW = os.getenv("OIDC_ALLOW_IMPLICIT_FLOW", "False").lower() == "true"
+    OIDC_SUPPORTED_SCOPES = ["openid", "profile", "email"]
+    OIDC_DEFAULT_SCOPES = ["openid", "profile", "email"]
+    
+    # Key rotation
+    OIDC_KEY_ROTATION_DAYS = int(os.getenv("OIDC_KEY_ROTATION_DAYS", "90"))
+    OIDC_KEY_GRACE_PERIOD_DAYS = int(os.getenv("OIDC_KEY_GRACE_PERIOD_DAYS", "30"))
+    
+    # Rate limiting
+    OIDC_RATE_LIMIT_AUTHORIZE = os.getenv("OIDC_RATE_LIMIT_AUTHORIZE", "10/minute")
+    OIDC_RATE_LIMIT_TOKEN = os.getenv("OIDC_RATE_LIMIT_TOKEN", "20/minute")
+    OIDC_RATE_LIMIT_USERINFO = os.getenv("OIDC_RATE_LIMIT_USERINFO", "60/minute")
 
     # API Versioning
     API_VERSION = "1.0.0"

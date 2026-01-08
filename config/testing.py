@@ -1,5 +1,6 @@
 """Testing environment configuration."""
 from config.base import BaseConfig
+import os
 
 
 class TestingConfig(BaseConfig):
@@ -7,6 +8,9 @@ class TestingConfig(BaseConfig):
 
     TESTING = True
     DEBUG = True
+    
+    # Explicitly set SECRET_KEY for testing
+    SECRET_KEY = os.getenv("SECRET_KEY", "test-secret-key-for-testing")
 
     # Use in-memory SQLite for testing
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
@@ -23,3 +27,7 @@ class TestingConfig(BaseConfig):
 
     # Use different Redis DB for testing
     REDIS_URL = "redis://localhost:6379/15"
+    
+    # Use filesystem for sessions in testing
+    SESSION_TYPE = "filesystem"
+    SESSION_FILE_DIR = "/tmp/flask_session_test"

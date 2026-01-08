@@ -3,11 +3,20 @@ import os
 import logging
 from flask import Flask
 from config import get_config
-from app.extensions import db, migrate, bcrypt, cors, ma, limiter, session
+from app.extensions import db, migrate, bcrypt, ma, limiter, session
 from app.middleware import RequestIDMiddleware, SecurityHeadersMiddleware, setup_cors
 from app.exceptions.base import BaseAPIException
 from app.utils.response import api_response
 import redis
+
+# Configure SQLAlchemy logging BEFORE any database operations
+# This must be done before db.init_app() to prevent verbose logging
+_log_level_env = os.getenv("SQLALCHEMY_LOG_LEVEL", "WARNING").upper()
+_sqlalchemy_log_level = getattr(logging, _log_level_env, logging.WARNING)
+logging.getLogger('sqlalchemy').setLevel(_sqlalchemy_log_level)
+logging.getLogger('sqlalchemy.engine').setLevel(_sqlalchemy_log_level)
+logging.getLogger('sqlalchemy.dialects').setLevel(_sqlalchemy_log_level)
+logging.getLogger('sqlalchemy.pool').setLevel(_sqlalchemy_log_level)
 
 
 def create_app(config_name=None):
@@ -53,12 +62,9 @@ def initialize_extensions(app):
     # Security
     bcrypt.init_app(app)
 
-    # CORS
-    cors.init_app(
-        app,
-        origins=app.config.get("CORS_ORIGINS", []),
-        supports_credentials=app.config.get("CORS_SUPPORTS_CREDENTIALS", True),
-    )
+    # CORS - using custom middleware only (see app/middleware/cors.py)
+    # Flask-CORS disabled to avoid conflicts
+    # cors.init_app(app)
 
     # Marshmallow
     ma.init_app(app)
@@ -84,14 +90,18 @@ def setup_middleware(app):
     """Setup application middleware."""
     RequestIDMiddleware(app)
     SecurityHeadersMiddleware(app)
-    setup_cors(app, cors)
+    setup_cors(app)
 
 
 def register_blueprints(app):
     """Register application blueprints."""
     from app.api import register_api_blueprints
+    from app.api.oidc import oidc_bp
 
     register_api_blueprints(app)
+
+    # Register OIDC blueprint at root level
+    app.register_blueprint(oidc_bp)
 
 
 def register_error_handlers(app):
@@ -169,7 +179,11 @@ def setup_logging(app):
 
     app.logger.setLevel(log_level)
 
-    # Reduce SQLAlchemy logging noise
-    logging.getLogger('sqlalchemy').setLevel(logging.WARNING)
+    # Configure SQLAlchemy logging level (also set at module level before DB init)
+    sqlalchemy_log_level = getattr(logging, app.config.get("SQLALCHEMY_LOG_LEVEL", "WARNING"), logging.WARNING)
+    logging.getLogger('sqlalchemy').setLevel(sqlalchemy_log_level)
+    logging.getLogger('sqlalchemy.engine').setLevel(sqlalchemy_log_level)
+    logging.getLogger('sqlalchemy.dialects').setLevel(sqlalchemy_log_level)
+    logging.getLogger('sqlalchemy.pool').setLevel(sqlalchemy_log_level)
 
     app.logger.info("Application startup")

@@ -7,6 +7,12 @@ This script creates:
 - Proper organization memberships with different roles
 """
 import sys
+import secrets
+import hashlib
+from dotenv import load_dotenv
+
+# Load environment variables FIRST before any app imports
+load_dotenv()
 
 from app import create_app
 from app.extensions import db
@@ -14,13 +20,10 @@ from app.models.user import User
 from app.models.organization import Organization
 from app.models.organization_member import OrganizationMember
 from app.models.authentication_method import AuthenticationMethod
+from app.models.oidc_client import OIDCClient
 from app.services.auth_service import AuthService
 from app.services.organization_service import OrganizationService
 from app.utils.constants import OrganizationRole, UserStatus, AuthMethodType
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Create application
 app = create_app()
@@ -112,6 +115,38 @@ def add_org_member(org, user_id, role, inviter_id):
         if "already a member" in str(e).lower():
             print(f"    → User {user_id} is already a member of {org.name}, skipping")
             return
+        raise e
+
+
+def create_or_get_oidc_client(org_id, name, client_id, client_secret,
+                               redirect_uris, grant_types, response_types, scopes,
+                               **kwargs):
+    """Create an OIDC client if it doesn't exist, or return existing client."""
+    existing = OIDCClient.query.filter_by(client_id=client_id, deleted_at=None).first()
+    if existing:
+        print(f"  → OIDC Client {name} already exists, skipping")
+        return existing
+    
+    try:
+        # Hash the client secret
+        client_secret_hash = hashlib.sha256(client_secret.encode()).hexdigest()
+        
+        client = OIDCClient(
+            organization_id=org_id,
+            name=name,
+            client_id=client_id,
+            client_secret_hash=client_secret_hash,
+            redirect_uris=redirect_uris,
+            grant_types=grant_types,
+            response_types=response_types,
+            scopes=scopes,
+            **kwargs
+        )
+        client.save()
+        print(f"  → Created OIDC client: {name}")
+        return client
+    except Exception as e:
+        print(f"  → Error creating OIDC client {name}: {e}")
         raise e
 
 
@@ -388,6 +423,113 @@ def seed_data():
                 add_org_member(tech_org, charlie.id, OrganizationRole.MEMBER, sarah.id)
         
         # =========================================================================
+        # Step 5: Create OIDC Clients
+        # =========================================================================
+        print("\n[Step 5] Creating OIDC Clients...")
+        oidc_clients = {}
+        
+        # OIDC Client for Acme Corp - Internal Portal
+        if acme_org:
+            print("\n  Acme Corporation OIDC Clients:")
+            acme_portal_client = create_or_get_oidc_client(
+                org_id=acme_org.id,
+                name="Acme Internal Portal",
+                client_id="acme-portal-001",
+                client_secret="acme_secret_portal_2024",
+                redirect_uris=[
+                    "https://portal.acme-corp.com/auth/callback",
+                    "http://localhost:3000/auth/callback",
+                ],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                scopes=["openid", "profile", "email", "offline_access"],
+                is_active=True,
+                is_confidential=True,
+                require_pkce=True,
+                access_token_lifetime=3600,  # 1 hour
+                refresh_token_lifetime=2592000,  # 30 days
+                id_token_lifetime=3600,  # 1 hour
+                logo_uri="https://portal.acme-corp.com/logo.png",
+                client_uri="https://portal.acme-corp.com",
+            )
+            oidc_clients["acme-portal"] = acme_portal_client
+            
+            # OIDC Client for Acme Corp - Mobile App
+            acme_mobile_client = create_or_get_oidc_client(
+                org_id=acme_org.id,
+                name="Acme Mobile App",
+                client_id="acme-mobile-001",
+                client_secret="acme_secret_mobile_2024",
+                redirect_uris=[
+                    "com.acmecorp.app://oauth/callback",
+                    "http://localhost:8080/callback",
+                ],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                scopes=["openid", "profile", "email", "offline_access"],
+                is_active=True,
+                is_confidential=False,  # Public client (mobile)
+                require_pkce=True,
+                access_token_lifetime=1800,  # 30 minutes
+                refresh_token_lifetime=604800,  # 7 days
+                id_token_lifetime=1800,  # 30 minutes
+            )
+            oidc_clients["acme-mobile"] = acme_mobile_client
+        
+        # OIDC Client for Tech Startup
+        if tech_org:
+            print("\n  Tech Startup OIDC Clients:")
+            tech_app_client = create_or_get_oidc_client(
+                org_id=tech_org.id,
+                name="Tech Startup Dashboard",
+                client_id="tech-dashboard-001",
+                client_secret="tech_secret_dashboard_2024",
+                redirect_uris=[
+                    "https://dashboard.tech-startup.com/auth/callback",
+                    "http://localhost:4200/auth/callback",
+                ],
+                grant_types=["authorization_code", "refresh_token"],
+                response_types=["code"],
+                scopes=["openid", "profile", "email", "offline_access"],
+                is_active=True,
+                is_confidential=True,
+                require_pkce=True,
+                access_token_lifetime=3600,  # 1 hour
+                refresh_token_lifetime=2592000,  # 30 days
+                id_token_lifetime=3600,  # 1 hour
+                logo_uri="https://tech-startup.com/logo.png",
+                client_uri="https://tech-startup.com",
+            )
+            oidc_clients["tech-dashboard"] = tech_app_client
+        
+        # OIDC Client for Data Systems
+        if data_org:
+            print("\n  Data Systems OIDC Clients:")
+            data_api_client = create_or_get_oidc_client(
+                org_id=data_org.id,
+                name="Data Systems API Client",
+                client_id="data-api-001",
+                client_secret="data_secret_api_2024",
+                redirect_uris=[
+                    "https://api.data-systems.com/oauth/callback",
+                    "http://localhost:5000/oauth/callback",
+                ],
+                grant_types=["authorization_code", "refresh_token", "client_credentials"],
+                response_types=["code"],
+                scopes=["openid", "profile", "email", "api:read", "api:write"],
+                is_active=True,
+                is_confidential=True,
+                require_pkce=False,  # Server-to-server client
+                access_token_lifetime=7200,  # 2 hours
+                refresh_token_lifetime=2592000,  # 30 days
+                id_token_lifetime=3600,  # 1 hour
+                client_uri="https://data-systems.com",
+            )
+            oidc_clients["data-api"] = data_api_client
+        
+        print(f"\n  Created {len(oidc_clients)} OIDC clients")
+        
+        # =========================================================================
         # Summary
         # =========================================================================
         print("\n" + "=" * 60)
@@ -398,6 +540,7 @@ def seed_data():
         print(f"  Organizations: {len(org_objects)}")
         print(f"  Admin Users: {len(admin_objects)}")
         print(f"  Regular Users: {len(all_users)}")
+        print(f"  OIDC Clients: {len(oidc_clients)}")
         
         print("\n🔐 Test Credentials:")
         print("\n  Admin Accounts:")
@@ -420,6 +563,30 @@ def seed_data():
             owner_email = owner.email if owner else "None"
             print(f"  {org.name} (slug: {slug})")
             print(f"    Members: {member_count}, Owner: {owner_email}")
+        
+        print("\n🔐 OIDC Clients:")
+        for key, client in oidc_clients.items():
+            print(f"  {client.name}")
+            print(f"    Client ID: {client.client_id}")
+            print(f"    Organization: {client.organization.name}")
+            print(f"    Grant Types: {', '.join(client.grant_types)}")
+            print(f"    Scopes: {', '.join(client.scopes)}")
+            print(f"    Redirect URIs: {len(client.redirect_uris)} configured")
+        
+        if oidc_clients:
+            print("\n  📝 OIDC Client Credentials (for testing):")
+            print("    Acme Portal:")
+            print("      client_id: acme-portal-001")
+            print("      client_secret: acme_secret_portal_2024")
+            print("    Acme Mobile:")
+            print("      client_id: acme-mobile-001")
+            print("      client_secret: acme_secret_mobile_2024")
+            print("    Tech Dashboard:")
+            print("      client_id: tech-dashboard-001")
+            print("      client_secret: tech_secret_dashboard_2024")
+            print("    Data API:")
+            print("      client_id: data-api-001")
+            print("      client_secret: data_secret_api_2024")
         
         print("\n" + "=" * 60)
 

@@ -282,3 +282,13 @@ MIT
 For issues and questions:
 - GitHub Issues: [repository-url]/issues
 - Documentation: See `docs/` directory
+
+
+# Boostrap db
+python manage.py db upgrade
+python manage.py db migrate
+
+
+
+## running seed
+python -m scripts.seed_data

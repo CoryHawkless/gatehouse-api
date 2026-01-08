@@ -12,13 +12,7 @@ from flask_session import Session
 db = SQLAlchemy()
 migrate = Migrate()
 bcrypt = Bcrypt()
-cors = CORS(
-    supports_credentials=True,
-    resources={r"/api/*": {"origins": "*"}},  # Apply CORS to all API routes
-    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
-    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    expose_headers=["X-Request-ID"],
-)
+cors = CORS()
 ma = Marshmallow()
 limiter = Limiter(
     key_func=get_remote_address,

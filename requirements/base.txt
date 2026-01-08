@@ -17,6 +17,10 @@ marshmallow-sqlalchemy==0.29.0
 bcrypt==4.1.2
 Flask-Bcrypt==1.0.1
 
+# JWT / OIDC
+PyJWT==2.8.0
+cryptography==41.0.7
+
 # CORS
 Flask-CORS==4.0.0
 

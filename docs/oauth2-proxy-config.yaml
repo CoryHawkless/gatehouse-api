@@ -1,0 +1,251 @@
+# OAuth2-Proxy Configuration Example
+# ================================
+# This configuration file demonstrates how to configure oauth2-proxy
+# to use this OIDC provider for authentication.
+#
+# oauth2-proxy project: https://oauth2-proxy.github.io/oauth2-proxy/
+#
+# Usage:
+#   oauth2-proxy -config /path/to/oauth2-proxy-config.yaml
+#
+# Environment variables can also be used by prefixing with OAUTH2_PROXY_
+# e.g., OAUTH2_PROXY_PROVIDER="oidc"
+
+# Server Configuration
+# --------------------
+# The address and port to bind to
+http_address: "0.0.0.0:4180"
+https_address: ":4443"
+
+# OIDC Provider Configuration
+# ---------------------------
+# Provider configuration - OIDC for our authy2 backend
+provider: "oidc"
+
+# OIDC issuer URL - points to our OIDC discovery endpoint
+# This should be the base URL of your authy2 backend
+oidc_issuer_url: "http://localhost:5000"
+
+# Email domains to allow (empty means any email is allowed)
+# email_domains:
+#   - "*"
+
+# Client Configuration
+# --------------------
+# Client ID and secret obtained from OIDC Client Registration
+# Run: curl -X POST http://localhost:5000/oidc/register -H "Content-Type: application/json" -d '{"client_name":"oauth2-proxy","redirect_uris":["http://localhost:4180/oauth2/callback"],"scope":"openid profile email"}'
+client_id: "your-client-id-here"
+client_secret: "your-client-secret-here"
+
+# Client ID file (alternative to providing secret directly)
+# client_id_file: "/etc/oauth2-proxy/client_id"
+# client_secret_file: "/etc/oauth2-proxy/client_secret"
+
+# OIDC Scopes
+# ------------
+# Scopes to request from the OIDC provider
+# The "openid" scope is always requested
+# Available scopes in our OIDC provider: openid, profile, email
+scope: "openid profile email"
+
+# Cookie Configuration
+# --------------------
+# Secret key for cookie encryption (should be random and kept secret)
+# Generate with: openssl rand -base64 32 | head -c 32 | xargs
+cookie_secret: "your-random-cookie-secret-min-32-chars"
+
+# Name of the cookie that oauth2-proxy will use
+cookie_name: "_oauth2_proxy"
+
+# Cookie options
+cookie_expire: "168h"  # 7 days
+cookie_refresh: "1h"   # Refresh cookie every hour
+secure_cookies: false  # Set to true in production with HTTPS
+http_only_cookies: true
+
+# Upstream Configuration
+# ---------------------
+# The upstream application to proxy requests to
+# Multiple upstreams can be configured
+upstream: "http://127.0.0.1:8080/"
+
+# Internal upstream (not accessible from internet)
+# internal_upstream: "http://127.0.0.1:8081/"
+
+# Response Configuration
+# ----------------------
+# URL to redirect users to after successful authentication
+# Can be overridden per-request with &rd parameter
+redirect_url: "http://localhost:4180/oauth2/callback"
+
+# Sign-in URL (shown when not authenticated)
+sign_in_url: "http://localhost:4180/sign_in"
+
+# Sign-out URL
+sign_out_url: "http://localhost:4180/sign_out"
+
+# Proxy Configuration
+# -------------------
+# List of paths to protect
+# Requests to these paths will require authentication
+proxy_root_controller: true
+
+# Skip JWT verification for specific routes (advanced)
+# skip_auth_routes:
+#   - path: /public
+#     regex: false
+#   - path: /api/health
+#     regex: true
+
+# Headers Configuration
+# ---------------------
+# Headers to set for authenticated requests
+# These headers are passed to the upstream application
+set_authorization_header: true
+set_x_auth_request_header: true
+
+# Pass headers from OIDC provider
+# pass_access_token: true
+# pass_id_token_header: true
+
+# Custom headers
+# headers:
+#   X-Forwarded-User: "${email}"
+#   X-Forwarded-Groups: "${groups}"
+
+# Token Validation
+# ----------------
+# Validate tokens against the OIDC provider
+validate_session: true
+
+# Refresh expired tokens
+# refresh_token: true
+
+# Logging Configuration
+# ---------------------
+# Log level: debug, info, warn, error
+log_level: "info"
+
+# Log format: apache, json, nginx
+log_format: "json"
+
+# Metrics Configuration
+# ---------------------
+# Enable metrics endpoint
+metrics_address: "0.0.0.0:9090"
+
+# Request Logging
+# ---------------
+# Log requests to stdout
+request_logging: true
+
+# Batch request logging
+# batch_request_logging: false
+
+# Reverse Proxy Headers
+# ---------------------
+# Use X-Real-IP header from reverse proxy
+real_ip_header: "X-Real-IP"
+
+# Trusted CIDRs (for determining client IP)
+# trusted_cirs:
+#   - "10.0.0.0/8"
+#   - "172.16.0.0/12"
+#   - "192.168.0.0/16"
+
+# Rate Limiting
+# -------------
+# Enable rate limiting
+# enable_ratelimit: true
+# ratelimit:
+#   type: "memory"
+#   requests_per_second: 10
+
+# Advanced Options
+# ----------------
+# Whitelist emails (users who can authenticate)
+# whitelist_emails:
+#   - "admin@example.com"
+
+# Blacklist emails (users who cannot authenticate)
+# blacklist_emails:
+#   - "banned@example.com"
+
+# Whitelist domains
+# whitelist_domains:
+#   - "@example.com"
+
+# Skip OIDC discovery (use manual endpoints)
+# skip_oidc_discovery: false
+# login_url: "http://localhost:5000/oidc/authorize"
+# redeem_url: "http://localhost:5000/oidc/token"
+# profile_url: "http://localhost:5000/oidc/userinfo"
+# validate_url: "http://localhost:5000/oidc/jwks"
+
+# TLS Configuration
+# -----------------
+# Enable TLS (uncomment in production)
+# tls: true
+# tls_cert_file: "/etc/ssl/certs/oauth2-proxy.crt"
+# tls_key_file: "/etc/ssl/private/oauth2-proxy.key"
+
+# Skip TLS verification (for testing only)
+# tls_insecure_skip_verify: false
+
+# OIDC Extra Configuration
+# ------------------------
+# Extra parameters to pass to authorization request
+# authorise_params:
+#   acr_values: "urn:goauthentik.io:authentication:factor"
+#   max_age: "3600"
+
+# Ping path for health checks
+# ping_path: "/ping"
+
+# Example Usage Scenarios
+# =======================
+
+# Scenario 1: Basic Setup with Local OIDC Provider
+# ------------------------------------------------
+# Use this configuration when running oauth2-proxy locally
+# pointing to the authy2 backend running on localhost:5000
+
+# Scenario 2: Production Setup with HTTPS
+# ---------------------------------------
+# For production, use HTTPS for all connections
+# Set secure_cookies: true
+# Configure TLS certificates
+# Point to your production OIDC issuer URL
+
+# Scenario 3: Docker Compose Setup
+# --------------------------------
+# Example docker-compose.yml for oauth2-proxy:
+#
+# version: '3'
+# services:
+#   oauth2-proxy:
+#     image: oauth2-proxy/oauth2-proxy:latest
+#     ports:
+#       - "4180:4180"
+#     volumes:
+#       - ./oauth2-proxy-config.yaml:/etc/oauth2-proxy/config.yaml
+#     environment:
+#       - OAUTH2_PROXY_PROVIDER=oidc
+#       - OAUTH2_PROXY_OIDC_ISSUER_URL=http://authy2:5000
+#       - OAUTH2_PROXY_CLIENT_ID=${OIDC_CLIENT_ID}
+#       - OAUTH2_PROXY_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+#       - OAUTH2_PROXY_COOKIE_SECRET=${COOKIE_SECRET}
+#     depends_on:
+#       - authy2
+
+# Scenario 4: Kubernetes Ingress with oauth2-proxy
+# -------------------------------------------------
+# Example annotation for Kubernetes Ingress:
+#
+# nginx.ingress.kubernetes.io/auth-url: https://$host/oauth2/auth
+# nginx.ingress.kubernetes.io/auth-signin: https://$host/oauth2/sign_in
+# nginx.ingress.kubernetes.io/configuration-snippet: |
+#   auth_request_set $user $upstream_http_x_auth_request_user;
+#   auth_request_set $email $upstream_http_x_auth_request_email;
+#   proxy_set_header X-User $user;
+#   proxy_set_header X-Email $email;
