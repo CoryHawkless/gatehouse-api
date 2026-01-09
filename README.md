@@ -292,3 +292,16 @@ python manage.py db migrate
 
 ## running seed
 python -m scripts.seed_data
+
+## Running flask in dev
+FLASK_ENV=development flask run --debug --port 8888
+
+
+# Test creds
+## OIDC Client
+client_id: acme-portal-001
+client_secret: acme_secret_portal_2024
+
+## User
+email: bob@acme-corp.com
+password: UserPass123!
