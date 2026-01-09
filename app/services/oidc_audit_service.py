@@ -84,7 +84,7 @@ class OIDCAuditService:
             ip_address=context["ip_address"],
             user_agent=context["user_agent"],
             request_id=context["request_id"],
-            metadata=metadata,
+            event_metadata=metadata,
         )
         
         return log

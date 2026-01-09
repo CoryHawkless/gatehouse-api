@@ -1,12 +1,18 @@
 """Application factory."""
 import os
 import logging
+
+# Test debug logging - this should appear when running `flask run --debug`
+_root_logger = logging.getLogger(__name__)
+_root_logger.debug("[TEST] Debug logging is working!")
+
 from flask import Flask
 from config import get_config
 from app.extensions import db, migrate, bcrypt, ma, limiter, session
 from app.middleware import RequestIDMiddleware, SecurityHeadersMiddleware, setup_cors
 from app.exceptions.base import BaseAPIException
 from app.utils.response import api_response
+from app.services.oidc_jwks_service import OIDCJWKSService
 import redis
 
 # Configure SQLAlchemy logging BEFORE any database operations
@@ -49,6 +55,9 @@ def create_app(config_name=None):
 
     # Setup logging
     setup_logging(app)
+
+    # Initialize OIDC JWKS service with a signing key
+    initialize_oidc_jwks(app)
 
     return app
 
@@ -167,16 +176,32 @@ def setup_logging(app):
 
     # Create formatter
     formatter = logging.Formatter(
-        "[%(asctime)s] %(levelname)s in %(module)s: %(message)s"
+        "[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"
     )
 
-    # Configure root logger
+    # Configure root logger - this ensures all module loggers (like app.services.oidc_service)
+    # will output DEBUG level logs when in development mode
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    
     if app.config.get("LOG_TO_STDOUT"):
         stream_handler = logging.StreamHandler()
         stream_handler.setFormatter(formatter)
         stream_handler.setLevel(log_level)
-        app.logger.addHandler(stream_handler)
+        root_logger.addHandler(stream_handler)
 
+    # Disable Werkzeug's default logger to avoid log duplication and interference
+    werkzeug_logger = logging.getLogger('werkzeug')
+    werkzeug_logger.setLevel(logging.INFO)
+
+    # Ensure child loggers propagate to root logger
+    # This is the key fix - explicitly enable propagation for common app loggers
+    for logger_name in ['app', 'app.api', 'app.api.oidc', 'app.services', 'app.models']:
+        child_logger = logging.getLogger(logger_name)
+        child_logger.propagate = True
+        child_logger.setLevel(log_level)
+
+    # Configure Flask app logger
     app.logger.setLevel(log_level)
 
     # Configure SQLAlchemy logging level (also set at module level before DB init)
@@ -187,3 +212,27 @@ def setup_logging(app):
     logging.getLogger('sqlalchemy.pool').setLevel(sqlalchemy_log_level)
 
     app.logger.info("Application startup")
+    
+    # Test debug log after logging is configured
+    app.logger.debug("[TEST] Debug logging is working!")
+
+
+def initialize_oidc_jwks(app):
+    """Initialize OIDC JWKS service with a signing key.
+    
+    This ensures that signing keys are available for token generation.
+    
+    Args:
+        app: Flask application instance
+    """
+    with app.app_context():
+        try:
+            jwks_service = OIDCJWKSService()
+            signing_key = jwks_service.get_signing_key()
+            if not signing_key:
+                signing_key = jwks_service.initialize_with_key()
+                app.logger.info(f"[OIDC] Generated new signing key: kid={signing_key.kid}")
+            else:
+                app.logger.info(f"[OIDC] Using existing signing key: kid={signing_key.kid}")
+        except Exception as e:
+            app.logger.error(f"[OIDC] Failed to initialize JWKS: {e}")

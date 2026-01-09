@@ -1,11 +1,14 @@
 """OIDC (OpenID Connect) API endpoints - Root level blueprint."""
 import base64
 import json
+import logging
 import secrets
 from urllib.parse import urlencode, urlparse, parse_qs
 
 import bcrypt
 from flask import Blueprint, request, redirect, jsonify, session, g, current_app, Response
+
+logger = logging.getLogger(__name__)
 
 from app.utils.response import api_response
 from app.services.oidc_service import (
@@ -13,6 +16,7 @@ from app.services.oidc_service import (
 )
 from app.services.auth_service import AuthService
 from app.extensions import db
+from app.extensions import bcrypt as flask_bcrypt
 from app.models import User, OIDCClient
 from app.models.organization import Organization
 from app.exceptions.auth_exceptions import InvalidCredentialsError
@@ -62,12 +66,21 @@ def authenticate_client(client_id, client_secret=None):
     Raises:
         InvalidClientError: If authentication fails
     """
+    # Debug logging for client validation (controlled by LOG_LEVEL)
+    logger.debug(f"[OIDC] Client validation: client_id={client_id}, confidential={client_secret is not None}")
+    
     client = OIDCClient.query.filter_by(client_id=client_id, is_active=True).first()
     if not client:
+        logger.debug(f"[OIDC] Client validation: client_id={client_id}, exists=False")
         raise InvalidClientError("Invalid client")
     
+    logger.debug(f"[OIDC] Client validation: client_id={client_id}, client_id_db={client.id}, exists=True")
+    
     if client.is_confidential and client_secret:
-        if not bcrypt.check_password_hash(client.client_secret_hash, client_secret):
+        # Try Flask-Bcrypt first (new format)
+        secret_match = _check_password_hash(client, client_secret)
+        logger.debug(f"[OIDC] Client secret validation: client_id={client_id}, match={secret_match}")
+        if not secret_match:
             raise InvalidClientError("Invalid client credentials")
     
     return client
@@ -94,6 +107,40 @@ def require_valid_token():
         raise InvalidGrantError("Invalid token: User not found")
     
     g.current_user = user
+
+
+def _check_password_hash(client, password):
+    """Check password hash with backward compatibility for old bcrypt format.
+    
+    Tries Flask-Bcrypt first (new format), then falls back to raw bcrypt (old format).
+    If old format matches, re-hashes with new format for migration.
+    """
+    pw_hash = client.client_secret_hash
+    
+    # Try Flask-Bcrypt first (new format)
+    try:
+        return flask_bcrypt.check_password_hash(pw_hash, password)
+    except ValueError:
+        # Invalid salt - try raw bcrypt (old format)
+        pass
+    
+    # Try raw bcrypt (old format) as fallback
+    try:
+        match = bcrypt.checkpw(
+            pw_hash.encode('utf-8') if isinstance(pw_hash, str) else pw_hash,
+            password.encode('utf-8') if isinstance(password, str) else password
+        )
+        if match:
+            # Migrate to new format
+            new_hash = flask_bcrypt.generate_password_hash(
+                password.decode('utf-8') if isinstance(password, bytes) else password
+            ).decode('utf-8')
+            client.client_secret_hash = new_hash
+            db.session.commit()
+            logger.info(f"[OIDC] Migrated client secret hash to new format: client_id={client.client_id}")
+        return match
+    except Exception:
+        return False
 
 
 def parse_basic_auth():
@@ -170,13 +217,18 @@ def oidc_authorize():
         200: Login page (GET when not authenticated)
         400: Invalid request
     """
+    logger.debug("[OIDC] oidc_authorize called")
+
+    
     # Parse request parameters
     if request.method == "GET":
         params = request.args.to_dict()
     else:
         params = request.form.to_dict()
     
+    logger.debug("[OIDC] Raw request params: %s", params)
     # Extract required parameters
+    logger.debug("[OIDC] Extracting request parameters...")
     client_id = params.get("client_id")
     redirect_uri = params.get("redirect_uri")
     response_type = params.get("response_type")
@@ -186,7 +238,12 @@ def oidc_authorize():
     code_challenge = params.get("code_challenge")
     code_challenge_method = params.get("code_challenge_method")
     
+    logger.debug("[OIDC] Extracted parameters: client_id=%s, redirect_uri=%s, response_type=%s", client_id, redirect_uri, response_type)
+    logger.debug("[OIDC] Extracted parameters: scope=%s, state=%s, nonce=%s", scope, state, nonce)
+    logger.debug("[OIDC] Extracted parameters: code_challenge=%s, code_challenge_method=%s", code_challenge, code_challenge_method)
+    
     # Validate required parameters
+    logger.debug("[OIDC] Validating required parameters...")
     errors = []
     if not client_id:
         errors.append("client_id is required")
@@ -195,42 +252,76 @@ def oidc_authorize():
     if not response_type:
         errors.append("response_type is required")
     
+    logger.debug("[OIDC] Parameter validation errors: %s", errors)
     if errors:
+        logger.debug("[OIDC] Redirecting with error: invalid_request")
         return _redirect_with_error(redirect_uri, "invalid_request", "; ".join(errors), state)
     
     # Validate response_type
+    logger.debug("[OIDC] Validating response_type: %s", response_type)
     if response_type != "code":
+        logger.debug("[OIDC] Redirecting with error: unsupported_response_type")
         return _redirect_with_error(
-            redirect_uri, "unsupported_response_type", 
+            redirect_uri, "unsupported_response_type",
             "Only response_type=code is supported", state
         )
+    logger.debug("[OIDC] response_type validation passed")
     
     # Validate client
+    logger.debug("[OIDC] Validating client: client_id=%s", client_id)
     client = OIDCClient.query.filter_by(client_id=client_id, is_active=True).first()
+    
+    logger.debug("[OIDC] Client query result: client=%s", client)
+    logger.debug("[OIDC] Client validation: client_id=%s, exists=%s, is_confidential=%s",
+                 client_id, client is not None, client.is_confidential if client else None)
+    
     if not client:
+        logger.debug("[OIDC] Redirecting with error: unauthorized_client (client not found)")
         return _redirect_with_error(redirect_uri, "unauthorized_client", "Invalid client", state)
+    logger.debug("[OIDC] Client validation passed")
     
     # Validate redirect URI
-    if not client.is_redirect_uri_allowed(redirect_uri):
+    logger.debug("[OIDC] Validating redirect_uri: %s", redirect_uri)
+    logger.debug("[OIDC] Client allowed redirect_uris: %s", client.redirect_uris)
+    is_redirect_allowed = client.is_redirect_uri_allowed(redirect_uri)
+    logger.debug("[OIDC] Redirect URI validation result: %s", is_redirect_allowed)
+    
+    if not is_redirect_allowed:
+        logger.debug("[OIDC] Redirecting with error: invalid_request (redirect_uri not allowed)")
         return _redirect_with_error(redirect_uri, "invalid_request", "Invalid redirect_uri", state)
+    logger.debug("[OIDC] Redirect URI validation passed")
     
     # Validate scopes
+    logger.debug("[OIDC] Validating scopes...")
     requested_scopes = scope.split() if scope else []
     allowed_scopes = client.scopes or []
     valid_scopes = [s for s in requested_scopes if s in allowed_scopes]
     
+    logger.debug("[OIDC] Requested scopes: %s", requested_scopes)
+    logger.debug("[OIDC] Allowed scopes: %s", allowed_scopes)
+    logger.debug("[OIDC] Valid scopes: %s", valid_scopes)
+    
     if not valid_scopes:
+        logger.debug("[OIDC] Redirecting with error: invalid_scope (no valid scopes)")
         return _redirect_with_error(redirect_uri, "invalid_scope", "Invalid or no scopes requested", state)
+    logger.debug("[OIDC] Scope validation passed")
     
     # Check if user is already authenticated via session
+    logger.debug("[OIDC] Checking session for existing authentication...")
     user_id = session.get("oidc_user_id")
+    logger.debug("[OIDC] Session oidc_user_id: %s", user_id)
     
     # Handle POST with credentials
     if request.method == "POST" and not user_id:
+        logger.debug("[OIDC] POST request with credentials (user not authenticated)")
         email = params.get("email")
         password = params.get("password")
         
+        logger.debug("[OIDC] Email provided: %s", email is not None)
+        logger.debug("[OIDC] Password provided: %s", password is not None)
+        
         if not email or not password:
+            logger.debug("[OIDC] Showing login page: missing credentials")
             return _show_login_page(
                 client_id=client_id,
                 redirect_uri=redirect_uri,
@@ -241,11 +332,15 @@ def oidc_authorize():
                 error="Invalid credentials"
             )
         
+        logger.debug("[OIDC] Attempting user authentication for email: %s", email)
         try:
             user = AuthService.authenticate(email, password)
             user_id = user.id
             session["oidc_user_id"] = user_id
+            
+            logger.debug("[OIDC] User authentication successful: user_id=%s, email=%s", user_id, email)
         except InvalidCredentialsError:
+            logger.debug("[OIDC] User authentication failed: invalid credentials for email=%s", email)
             return _show_login_page(
                 client_id=client_id,
                 redirect_uri=redirect_uri,
@@ -258,6 +353,7 @@ def oidc_authorize():
     
     # If no user, show login page
     if not user_id:
+        logger.debug("[OIDC] No authenticated user, showing login page")
         return _show_login_page(
             client_id=client_id,
             redirect_uri=redirect_uri,
@@ -267,10 +363,21 @@ def oidc_authorize():
             response_type=response_type
         )
     
+    logger.debug("[OIDC] User authenticated: user_id=%s", user_id)
+    
     # User is authenticated, generate authorization code
+    logger.debug("[OIDC] User is authenticated, fetching user from database...")
     user = User.query.get(user_id)
+    logger.debug("[OIDC] User query result: %s", user)
+    
     if not user:
+        logger.debug("[OIDC] Redirecting with error: server_error (user not found)")
         return _redirect_with_error(redirect_uri, "server_error", "User not found", state)
+    
+    logger.debug("[OIDC] Generating authorization code...")
+    logger.debug("[OIDC] Authorization code params: client_id=%s, user_id=%s, redirect_uri=%s", client_id, user_id, redirect_uri)
+    logger.debug("[OIDC] Authorization code params: scopes=%s, state=%s, nonce=%s", valid_scopes, state, nonce)
+    logger.debug("[OIDC] Authorization code params: code_challenge=%s, code_challenge_method=%s", code_challenge, code_challenge_method)
     
     try:
         code = OIDCService.generate_authorization_code(
@@ -285,15 +392,23 @@ def oidc_authorize():
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent"),
         )
+        logger.debug("[OIDC] Authorization code generated successfully: %s...", code[:20] if code else None)
     except Exception as e:
+        logger.debug("[OIDC] Authorization code generation failed: %s", str(e))
         return _redirect_with_error(redirect_uri, "server_error", str(e), state)
     
     # Redirect with authorization code
+    logger.debug("[OIDC] Redirecting with authorization code...")
     redirect_params = {"code": code}
     if state:
         redirect_params["state"] = state
     
-    return redirect(f"{redirect_uri}?{urlencode(redirect_params)}")
+    redirect_url = f"{redirect_uri}?{urlencode(redirect_params)}"
+    logger.debug("[OIDC] Redirect URL: %s...", redirect_url[:100] if redirect_url else None)
+    logger.debug("[OIDC] oidc_authorize completed successfully")
+    logger.debug("[OIDC] ===========================================")
+    
+    return redirect(redirect_url)
 
 
 def _redirect_with_error(redirect_uri, error, error_description, state=None):
@@ -414,10 +529,22 @@ def oidc_token():
     else:
         data = request.json or {}
     
+    # Debug: Log all incoming request parameters
+    logger.debug("[OIDC] oidc_token incoming request params:")
+    logger.debug("[OIDC]   content_type: %s", request.content_type)
+    logger.debug("[OIDC]   method: %s", request.method)
+    logger.debug("[OIDC]   headers: %s", dict(request.headers))
+    logger.debug("[OIDC]   data: %s", data)
+    logger.debug("[OIDC]   raw_data: %s", request.get_data(as_text=True))
+    
     grant_type = data.get("grant_type")
+    
+    # Debug: Log grant_type and client info
+    logger.debug("[OIDC]   grant_type: %s", grant_type)
     
     # Validate grant_type
     if not grant_type:
+        logger.error("[OIDC]   grant_type is requred")
         return api_response(
             success=False,
             message="grant_type is required",
@@ -444,8 +571,17 @@ def oidc_token():
         return response, 401
     
     try:
+        # Development-only debug logging for token endpoint client authentication
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Token endpoint client authentication: client_id={client_id}")
+        
         client = authenticate_client(client_id, client_secret)
+        
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Token endpoint client validation: client_id={client_id}, client_db_id={client.id}, success=True")
     except InvalidClientError:
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Token endpoint client validation: client_id={client_id}, success=False")
         response = jsonify({
             "error": "invalid_client",
             "error_description": "Invalid client credentials"
@@ -454,6 +590,7 @@ def oidc_token():
     
     # Handle authorization_code grant
     if grant_type == "authorization_code":
+        logger.debug(f"[OIDC] Handling authorization_code")
         return _handle_authorization_code_grant(data, client)
     
     # Handle refresh_token grant
@@ -462,6 +599,7 @@ def oidc_token():
     
     # Unsupported grant type
     else:
+        logger.error("[OIDC]   Unsupported grant_type")
         return api_response(
             success=False,
             message="Unsupported grant_type",
@@ -478,6 +616,7 @@ def _handle_authorization_code_grant(data, client):
     code_verifier = data.get("code_verifier")
     
     if not code:
+        logger.error("[OIDC]   code is required")
         return api_response(
             success=False,
             message="code is required",
@@ -487,6 +626,7 @@ def _handle_authorization_code_grant(data, client):
         )
     
     if not redirect_uri:
+        logger.error("[OIDC]   redirect_uri is required")
         return api_response(
             success=False,
             message="redirect_uri is required",
@@ -496,6 +636,10 @@ def _handle_authorization_code_grant(data, client):
         )
     
     try:
+        # Development-only debug logging for authorization code validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Authorization code validation: client_id={client.client_id}, code_provided=True")
+        
         claims, user = OIDCService.validate_authorization_code(
             code=code,
             client_id=client.client_id,
@@ -505,6 +649,16 @@ def _handle_authorization_code_grant(data, client):
             user_agent=request.headers.get("User-Agent"),
         )
     except InvalidGrantError as e:
+        logger.error(f"[OIDC]   INVALID_GRANT: {str(e)}")
+        return api_response(
+            success=False,
+            message=str(e),
+            status=400,
+            error_type="INVALID_GRANT",
+            error_details={"error": "invalid_grant", "error_description": str(e)},
+        )
+    except Exception as e:
+        logger.error(f"[OIDC]   Authorization code validation error: {type(e).__name__}: {str(e)}")
         return api_response(
             success=False,
             message=str(e),
@@ -515,6 +669,10 @@ def _handle_authorization_code_grant(data, client):
     
     # Generate tokens
     try:
+        # Development-only debug logging for token generation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Token generation: client_id={client.client_id}, user_id={claims['user_id']}, scope={claims['scope']}")
+        
         tokens = OIDCService.generate_tokens(
             client_id=client.client_id,
             user_id=claims["user_id"],
@@ -525,6 +683,7 @@ def _handle_authorization_code_grant(data, client):
             auth_time=int(__import__("time").time()),
         )
     except Exception as e:
+        logger.error(f"[OIDC]   Failed to generate tokens {str(e)}")
         return api_response(
             success=False,
             message="Failed to generate tokens",
@@ -906,7 +1065,7 @@ def oidc_register():
     # Generate client credentials
     client_id = f"oidc_{secrets.token_urlsafe(16)}"
     client_secret = f"secret_{secrets.token_urlsafe(24)}"
-    client_secret_hash = bcrypt.generate_password_hash(client_secret).decode("utf-8")
+    client_secret_hash = flask_bcrypt.generate_password_hash(client_secret).decode("utf-8")
     
     # Get organization from request or default
     org_id = data.get("organization_id")

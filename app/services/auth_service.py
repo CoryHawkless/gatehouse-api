@@ -1,6 +1,8 @@
 """Authentication service."""
+import logging
+import secrets
 from datetime import datetime, timedelta
-from flask import request, g
+from flask import request, g, current_app
 from app.extensions import db, bcrypt
 from app.models.user import User
 from app.models.authentication_method import AuthenticationMethod
@@ -9,7 +11,8 @@ from app.utils.constants import AuthMethodType, SessionStatus, UserStatus, Audit
 from app.exceptions.auth_exceptions import InvalidCredentialsError, AccountSuspendedError, AccountInactiveError
 from app.exceptions.validation_exceptions import EmailAlreadyExistsError
 from app.services.audit_service import AuditService
-import secrets
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -85,27 +88,45 @@ class AuthService:
         """
         # Find user
         user = User.query.filter_by(email=email.lower(), deleted_at=None).first()
+        
+        # Development-only debug logging for user existence check
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Auth] User lookup: email={email}, exists={user is not None}")
+        
         if not user:
             raise InvalidCredentialsError()
-
+        
         # Check account status
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Auth] Account status: user_id={user.id}, status={user.status}")
+        
         if user.status == UserStatus.SUSPENDED:
             raise AccountSuspendedError()
         if user.status == UserStatus.INACTIVE:
             raise AccountInactiveError()
-
+        
         # Find password auth method
         auth_method = AuthenticationMethod.query.filter_by(
             user_id=user.id,
             method_type=AuthMethodType.PASSWORD,
             deleted_at=None,
         ).first()
-
+        
+        # Development-only debug logging for auth method lookup
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Auth] Auth method lookup: user_id={user.id}, has_password_auth={auth_method is not None and auth_method.password_hash is not None}")
+        
         if not auth_method or not auth_method.password_hash:
             raise InvalidCredentialsError()
-
+        
         # Verify password
-        if not bcrypt.check_password_hash(auth_method.password_hash, password):
+        password_valid = bcrypt.check_password_hash(auth_method.password_hash, password)
+        
+        # Development-only debug logging for password validation (without logging actual password)
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Auth] Password validation: user_id={user.id}, valid={password_valid}")
+        
+        if not password_valid:
             raise InvalidCredentialsError()
 
         # Update last login

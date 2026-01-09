@@ -1,10 +1,13 @@
 """OIDC Service - Main OIDC service layer."""
+import logging
 import secrets
 import hashlib
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 from flask import current_app, g
+
+logger = logging.getLogger(__name__)
 
 from app.extensions import db
 from app.models import (
@@ -120,13 +123,24 @@ class OIDCService:
         """
         # Validate client exists and is active
         client = OIDCClient.query.filter_by(client_id=client_id).first()
+        
+        # Development-only debug logging for client validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Generate auth code - Client validation: client_id={client_id}, exists={client is not None}")
+        
         if not client:
             raise NotFoundError("Client not found")
+        
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Generate auth code - Client active validation: client_id={client_id}, is_active={client.is_active}")
         
         if not client.is_active:
             raise ValidationError("Client is not active")
         
         # Validate redirect URI
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Generate auth code - Redirect URI validation: client_id={client_id}, redirect_uri={redirect_uri}")
+        
         if not client.is_redirect_uri_allowed(redirect_uri):
             raise ValidationError("Invalid redirect_uri")
         
@@ -140,6 +154,10 @@ class OIDCService:
         # Generate authorization code
         code = cls._generate_code()
         code_hash = cls._hash_value(code)
+        
+        # Development-only debug logging for PKCE in code creation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Generate auth code - PKCE: code_challenge={code_challenge is not None}, code_challenge_method={code_challenge_method}")
         
         # Create auth code record
         auth_code = OIDCAuthCode.create_code(
@@ -195,7 +213,13 @@ class OIDCService:
         """
         # Get client
         client = OIDCClient.query.filter_by(client_id=client_id).first()
+        
+        # Development-only debug logging for client validation in code validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Validate auth code - Client validation: client_id={client_id}, exists={client is not None}")
+        
         if not client:
+            logger.error(f"[OIDC] Validate auth code - Client not found: client_id={client_id}")
             raise InvalidGrantError("Invalid client")
         
         # Hash the provided code and find matching auth code
@@ -206,7 +230,11 @@ class OIDCService:
             deleted_at=None
         ).first()
         
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Validate auth code - Code lookup: code_hash={code_hash[:20]}..., found={auth_code is not None}")
+        
         if not auth_code:
+            logger.error(f"[OIDC] Validate auth code - Code not found or deleted: code_hash={code_hash[:20]}...")
             OIDCAuditService.log_authorization_event(
                 client_id=client_id,
                 success=False,
@@ -217,6 +245,7 @@ class OIDCService:
         
         # Check if already used
         if auth_code.is_used:
+            logger.error(f"[OIDC] Validate auth code - Code already used: code_hash={code_hash[:20]}..., user_id={auth_code.user_id}")
             OIDCAuditService.log_authorization_event(
                 client_id=client_id,
                 user_id=auth_code.user_id,
@@ -228,6 +257,7 @@ class OIDCService:
         
         # Check expiration
         if auth_code.is_expired():
+            logger.error(f"[OIDC] Validate auth code - Code expired: code_hash={code_hash[:20]}..., expires_at={auth_code.expires_at}")
             OIDCAuditService.log_authorization_event(
                 client_id=client_id,
                 user_id=auth_code.user_id,
@@ -239,16 +269,22 @@ class OIDCService:
         
         # Validate redirect URI
         if auth_code.redirect_uri != redirect_uri:
+            logger.error(f"[OIDC] Validate auth code - Redirect URI mismatch: expected={auth_code.redirect_uri}, got={redirect_uri}")
             raise InvalidGrantError("Invalid redirect_uri")
         
         # Validate PKCE if required
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Validate auth code - PKCE: require_pkce={client.require_pkce}, has_verifier={bool(auth_code.code_verifier)}, provided_verifier={bool(code_verifier)}")
+        
         if client.require_pkce and auth_code.code_verifier:
             if not code_verifier:
+                logger.error(f"[OIDC] Validate auth code - PKCE required but no code_verifier provided")
                 raise ValidationError("code_verifier is required")
             
             # Verify code verifier
             expected_challenge = cls._compute_code_challenge(code_verifier, "S256")
             if expected_challenge != auth_code.code_verifier:
+                logger.error(f"[OIDC] Validate auth code - Invalid code_verifier: expected={expected_challenge[:20]}..., got={auth_code.code_verifier[:20]}...")
                 OIDCAuditService.log_authorization_event(
                     client_id=client_id,
                     user_id=auth_code.user_id,
@@ -263,7 +299,13 @@ class OIDCService:
         
         # Get user
         user = User.query.get(auth_code.user_id)
+        
+        # Development-only debug logging for user validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Validate auth code - User validation: user_id={auth_code.user_id}, exists={user is not None}")
+        
         if not user:
+            logger.error(f"[OIDC] Validate auth code - User not found: user_id={auth_code.user_id}")
             raise InvalidGrantError("User not found")
         
         claims = {
@@ -326,6 +368,11 @@ class OIDCService:
         
         # Get client
         client = OIDCClient.query.filter_by(client_id=client_id).first()
+        
+        # Development-only debug logging for token generation client validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Generate tokens - Client validation: client_id={client_id}, exists={client is not None}")
+        
         if not client:
             raise InvalidClientError()
         
@@ -466,6 +513,11 @@ class OIDCService:
         
         # Get client
         client = OIDCClient.query.filter_by(client_id=client_id).first()
+        
+        # Development-only debug logging for refresh token client validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Refresh token - Client validation: client_id={client_id}, exists={client is not None}")
+        
         if not client:
             raise InvalidClientError()
         
@@ -475,6 +527,10 @@ class OIDCService:
             token_hash=token_hash,
             deleted_at=None
         ).first()
+        
+        # Development-only debug logging for refresh token validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Refresh token - Token validation: user_id={refresh_token_obj.user_id if refresh_token_obj else None}, found={refresh_token_obj is not None}")
         
         if not refresh_token_obj:
             OIDCAuditService.log_token_event(
@@ -497,6 +553,9 @@ class OIDCService:
             raise InvalidGrantError("Refresh token expired or revoked")
         
         # Validate client matches
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[OIDC] Refresh token - Client match validation: expected={client.id}, actual={refresh_token_obj.client_id}, match={refresh_token_obj.client_id == client.id}")
+        
         if refresh_token_obj.client_id != client.id:
             raise InvalidGrantError("Client mismatch")
         

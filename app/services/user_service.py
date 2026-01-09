@@ -1,9 +1,13 @@
 """User service."""
+import logging
+from flask import current_app
 from app.extensions import db
 from app.models.user import User
 from app.exceptions.validation_exceptions import UserNotFoundError
 from app.utils.constants import AuditAction
 from app.services.audit_service import AuditService
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -24,6 +28,11 @@ class UserService:
             UserNotFoundError: If user not found
         """
         user = User.query.filter_by(id=user_id, deleted_at=None).first()
+        
+        # Development-only debug logging for user validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[User] Get user by ID: user_id={user_id}, exists={user is not None}")
+        
         if not user:
             raise UserNotFoundError()
         return user
@@ -39,7 +48,13 @@ class UserService:
         Returns:
             User instance or None
         """
-        return User.query.filter_by(email=email.lower(), deleted_at=None).first()
+        user = User.query.filter_by(email=email.lower(), deleted_at=None).first()
+        
+        # Development-only debug logging for user validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[User] Get user by email: email={email}, exists={user is not None}")
+        
+        return user
 
     @staticmethod
     def update_user(user, **kwargs):

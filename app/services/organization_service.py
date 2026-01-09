@@ -1,11 +1,15 @@
 """Organization service."""
+import logging
 from datetime import datetime
+from flask import current_app
 from app.extensions import db
 from app.models.organization import Organization
 from app.models.organization_member import OrganizationMember
 from app.exceptions.validation_exceptions import OrganizationNotFoundError, ConflictError
 from app.utils.constants import OrganizationRole, AuditAction
 from app.services.audit_service import AuditService
+
+logger = logging.getLogger(__name__)
 
 
 class OrganizationService:
@@ -80,6 +84,11 @@ class OrganizationService:
             OrganizationNotFoundError: If organization not found
         """
         org = Organization.query.filter_by(id=org_id, deleted_at=None).first()
+        
+        # Development-only debug logging for organization validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Org] Get organization by ID: org_id={org_id}, exists={org is not None}")
+        
         if not org:
             raise OrganizationNotFoundError()
         return org
@@ -95,7 +104,13 @@ class OrganizationService:
         Returns:
             Organization instance or None
         """
-        return Organization.query.filter_by(slug=slug, deleted_at=None).first()
+        org = Organization.query.filter_by(slug=slug, deleted_at=None).first()
+        
+        # Development-only debug logging for organization validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Org] Get organization by slug: slug={slug}, exists={org is not None}")
+        
+        return org
 
     @staticmethod
     def update_organization(org, user_id, **kwargs):
@@ -180,6 +195,10 @@ class OrganizationService:
             deleted_at=None,
         ).first()
 
+        # Development-only debug logging for membership validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Org] Member check: org_id={org.id}, user_id={user_id}, already_member={existing is not None}")
+
         if existing:
             raise ConflictError("User is already a member of this organization")
 
@@ -222,6 +241,10 @@ class OrganizationService:
             organization_id=org.id,
             deleted_at=None,
         ).first()
+
+        # Development-only debug logging for membership removal validation
+        if current_app.config.get('ENV') == 'development':
+            logger.debug(f"[Org] Member removal: org_id={org.id}, user_id={user_id}, found={member is not None}")
 
         if member:
             member.delete(soft=True)

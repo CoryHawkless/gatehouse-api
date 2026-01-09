@@ -8,7 +8,6 @@ This script creates:
 """
 import sys
 import secrets
-import hashlib
 from dotenv import load_dotenv
 
 # Load environment variables FIRST before any app imports
@@ -122,14 +121,16 @@ def create_or_get_oidc_client(org_id, name, client_id, client_secret,
                                redirect_uris, grant_types, response_types, scopes,
                                **kwargs):
     """Create an OIDC client if it doesn't exist, or return existing client."""
+    from app.extensions import bcrypt
+    
     existing = OIDCClient.query.filter_by(client_id=client_id, deleted_at=None).first()
     if existing:
         print(f"  → OIDC Client {name} already exists, skipping")
         return existing
     
     try:
-        # Hash the client secret
-        client_secret_hash = hashlib.sha256(client_secret.encode()).hexdigest()
+        # Hash the client secret using Flask-Bcrypt (same as oidc_register)
+        client_secret_hash = bcrypt.generate_password_hash(client_secret).decode("utf-8")
         
         client = OIDCClient(
             organization_id=org_id,
