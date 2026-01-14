@@ -1,6 +1,6 @@
 """Base model with common fields and functionality."""
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app.extensions import db
 
 
@@ -16,9 +16,9 @@ class BaseModel(db.Model):
         unique=True,
         nullable=False,
     )
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(
-        db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
     )
     deleted_at = db.Column(db.DateTime, nullable=True)
 
@@ -36,7 +36,7 @@ class BaseModel(db.Model):
             soft: If True, performs soft delete. If False, hard delete.
         """
         if soft:
-            self.deleted_at = datetime.utcnow()
+            self.deleted_at = datetime.now(timezone.utc)
             db.session.commit()
         else:
             db.session.delete(self)
@@ -47,7 +47,7 @@ class BaseModel(db.Model):
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
         db.session.commit()
         return self
 

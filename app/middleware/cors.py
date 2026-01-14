@@ -26,6 +26,7 @@ def setup_cors(app):
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Request-ID"
                 response.headers["Access-Control-Max-Age"] = "3600"
+                response.headers["Cache-Control"] = "no-cache, no-store"
                 return response
             elif origin and origin in cors_origins:
                 response = make_response("", 204)
@@ -34,6 +35,7 @@ def setup_cors(app):
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Request-ID"
                 response.headers["Access-Control-Allow-Credentials"] = "true"
                 response.headers["Access-Control-Max-Age"] = "3600"
+                response.headers["Cache-Control"] = "no-cache, no-store"
                 return response
 
     @app.after_request

@@ -24,6 +24,7 @@ class AuthMethodType(str, Enum):
     """Authentication method types."""
 
     PASSWORD = "password"
+    TOTP = "totp"
     GOOGLE = "google"
     GITHUB = "github"
     MICROSOFT = "microsoft"
@@ -66,6 +67,13 @@ class AuditAction(str, Enum):
     # Auth method actions
     AUTH_METHOD_ADD = "auth.method.add"
     AUTH_METHOD_REMOVE = "auth.method.remove"
+    TOTP_ENROLL_INITIATED = "totp.enroll.initiated"
+    TOTP_ENROLL_COMPLETED = "totp.enroll.completed"
+    TOTP_VERIFY_SUCCESS = "totp.verify.success"
+    TOTP_VERIFY_FAILED = "totp.verify.failed"
+    TOTP_DISABLED = "totp.disabled"
+    TOTP_BACKUP_CODE_USED = "totp.backup_code.used"
+    TOTP_BACKUP_CODES_REGENERATED = "totp.backup_codes.regenerated"
 
 
 class OIDCGrantType(str, Enum):

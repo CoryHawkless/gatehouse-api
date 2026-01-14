@@ -1,6 +1,6 @@
 """OIDC Token Metadata model for token revocation tracking."""
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from app.extensions import db
 from app.models.base import BaseModel
 
@@ -50,7 +50,11 @@ class OIDCTokenMetadata(BaseModel):
 
     def is_expired(self):
         """Check if the token has expired."""
-        return datetime.utcnow() > self.expires_at
+        # Handle both timezone-aware and timezone-naive expires_at values
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires_at
 
     def is_revoked(self):
         """Check if the token has been revoked."""
@@ -66,7 +70,7 @@ class OIDCTokenMetadata(BaseModel):
         Args:
             reason: Optional reason for revocation
         """
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(timezone.utc)
         self.revoked_reason = reason
         db.session.commit()
 

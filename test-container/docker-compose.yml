@@ -1,0 +1,92 @@
+version: "3.9"
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: app-nginx
+    volumes:
+      - ./app:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+    expose:
+      - "80"
+
+  # oauth2-proxy:
+  #   image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+  #   container_name: oauth2-proxy
+  #   depends_on:
+  #     - nginx
+  #   ports:
+  #     - "8086:4180"
+  #   environment:
+
+  #      # ----- Logging -----
+  #     OAUTH2_PROXY_LOG_LEVEL: "debug"
+  #     OAUTH2_PROXY_AUTH_LOGGING: "true"
+  #     OAUTH2_PROXY_REQUEST_LOGGING: "true"
+  #     OAUTH2_PROXY_STANDARD_LOGGING: "true"
+
+
+  #     # ----- Gatehouse OIDC -----
+  #     OAUTH2_PROXY_PROVIDER: oidc
+  #     OAUTH2_PROXY_OIDC_ISSUER_URL: "http://192.168.64.7:8888"
+  #     OAUTH2_PROXY_CLIENT_ID: "acme-portal-001"
+  #     OAUTH2_PROXY_CLIENT_SECRET: "acme_secret_portal_2024"
+  #     OAUTH2_PROXY_REDIRECT_URL: "http://192.168.64.7:8086/oauth2/callback"
+
+  #     # ----- Session -----
+  #     OAUTH2_PROXY_COOKIE_SECRET: "afhXcfftf5qKezJ217qhED7U4UeVyqBHd7lhISNGpXo="
+  #     OAUTH2_PROXY_COOKIE_SECURE: "false"
+  #     OAUTH2_PROXY_COOKIE_SAMESITE: "lax"
+  #     OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+  #     OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:4180"
+
+
+  #     # ----- Upstream -----
+  #     OAUTH2_PROXY_UPSTREAMS: "http://nginx:80"
+
+  #     # ----- Identity headers -----
+  #     OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+  #     OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+  #     OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
+
+  #     # ----- Claim mapping (Gatehouse) -----
+  #     OAUTH2_PROXY_OIDC_EMAIL_CLAIM: "email"
+  #     OAUTH2_PROXY_USER_ID_CLAIM: "preferred_username"
+  #     OAUTH2_PROXY_OIDC_GROUPS_CLAIM: "roles"
+
+  #     OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+
+
+  #     OAUTH2_PROXY_SCOPE: "openid email profile"
+  #     # OAUTH2_PROXY_OIDC_EMAIL_CLAIM: "email"
+  #     OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true"
+
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+    container_name: oauth2-proxy
+    depends_on: [nginx]
+    ports:
+      - "8086:4180"
+    command:
+      - --provider=oidc
+      - --oidc-issuer-url=http://192.168.64.7:8888
+      - --client-id=acme-portal-001
+      - --client-secret=acme_secret_portal_2024
+      - --redirect-url=http://192.168.64.7:8086/oauth2/callback
+      - --scope=openid email profile
+      - --email-domain=*
+      - --upstream=http://nginx:80
+      - --http-address=0.0.0.0:4180
+      - --cookie-secret=afhXcfftf5qKezJ217qhED7U4UeVyqBHd7lhISNGpXo=
+      - --cookie-secure=false
+      - --cookie-samesite=lax
+      - --skip-provider-button=true
+      - --standard-logging=true
+      - --request-logging=true
+      - --auth-logging=true
+      - --set-xauthrequest=true
+      - --pass-authorization-header=true   # optional (token passthrough)
+      - --pass-access-token=true           # optional (token passthrough)
+      - --pass-user-headers=true

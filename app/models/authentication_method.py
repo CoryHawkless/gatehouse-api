@@ -19,6 +19,11 @@ class AuthenticationMethod(BaseModel):
     provider_user_id = db.Column(db.String(255), nullable=True)
     provider_data = db.Column(db.JSON, nullable=True)
 
+    # # For TOTP authentication
+    # totp_secret = db.Column(db.String(32), nullable=True)
+    # totp_backup_codes = db.Column(db.JSON, nullable=True)
+    # totp_verified_at = db.Column(db.DateTime, nullable=True)
+
     # Metadata
     is_primary = db.Column(db.Boolean, default=False, nullable=False)
     verified = db.Column(db.Boolean, default=False, nullable=False)
@@ -51,9 +56,15 @@ class AuthenticationMethod(BaseModel):
             AuthMethodType.MICROSOFT,
         ]
 
+    def is_totp(self):
+        """Check if this is a TOTP authentication method."""
+        return self.method_type == AuthMethodType.TOTP
+
     def to_dict(self, exclude=None):
         """Convert to dictionary, excluding sensitive fields."""
         exclude = exclude or []
-        # Always exclude password hash
+        # Always exclude password hash and TOTP secrets
         exclude.append("password_hash")
+        exclude.append("totp_secret")
+        exclude.append("totp_backup_codes")
         return super().to_dict(exclude=exclude)

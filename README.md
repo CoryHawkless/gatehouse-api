@@ -305,3 +305,7 @@ client_secret: acme_secret_portal_2024
 ## User
 email: bob@acme-corp.com
 password: UserPass123!
+
+
+## Sqlite editor
+sqlite_web instance/db_file.db --port 9999 --host 0.0.0.0

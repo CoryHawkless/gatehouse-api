@@ -3,6 +3,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple
 
+from datetime import timezone
 from flask import current_app, g
 
 from app.extensions import db
@@ -219,11 +220,11 @@ class OIDCSessionService:
         """
         from datetime import timedelta
         
-        cutoff = datetime.utcnow() - timedelta(hours=older_than_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
         
         # Get expired sessions
         expired_sessions = OIDCSession.query.filter(
-            OIDCSession.expires_at < datetime.utcnow(),
+            OIDCSession.expires_at < datetime.now(timezone.utc),
             OIDCSession.deleted_at == None
         ).all()
         

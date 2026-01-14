@@ -51,4 +51,15 @@ class SecurityHeadersMiddleware:
             "geolocation=(), microphone=(), camera=()"
         )
 
+        # Cache-Control: Allow OIDC endpoints to set their own Cache-Control
+        # Only set no-cache for API responses that haven't set their own cache headers
+        if "Cache-Control" not in response.headers:
+            # Check if this is a JSON API response (shouldn't be cached)
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                response.headers["Cache-Control"] = "no-cache, no-store"
+            elif "text/html" not in content_type:
+                # For non-HTML responses, add Pragma for HTTP/1.0 compatibility
+                response.headers["Pragma"] = "no-cache"
+
         return response

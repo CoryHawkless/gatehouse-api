@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import secrets
+from datetime import datetime, timezone
 from urllib.parse import urlencode, urlparse, parse_qs
 
 import bcrypt
@@ -42,14 +43,14 @@ def get_oidc_config():
         "registration_endpoint": f"{base_url}/oidc/register",
         "revocation_endpoint": f"{base_url}/oidc/revoke",
         "introspection_endpoint": f"{base_url}/oidc/introspect",
-        "scopes_supported": ["openid", "profile", "email"],
+        "scopes_supported": ["openid", "profile", "email", "roles"],
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["RS256"],
-        "claims_supported": ["sub", "name", "email", "email_verified"],
+        "claims_supported": ["sub", "name", "email", "email_verified", "roles"],
     }
 
 
@@ -94,19 +95,49 @@ def require_valid_token():
     Raises:
         InvalidGrantError: If token is invalid
     """
+    logger.debug("[OIDC USERINFO] ===========================================")
+    logger.debug("[OIDC USERINFO] require_valid_token() called")
+    logger.debug("[OIDC USERINFO] Request method: %s", request.method)
+    logger.debug("[OIDC USERINFO] Request URL: %s", request.url)
+    logger.debug("[OIDC USERINFO] Request headers: %s", dict(request.headers))
+    
     auth_header = request.headers.get("Authorization", "")
+    logger.debug("[OIDC USERINFO] Authorization header: %s", auth_header[:20] + "..." if len(auth_header) > 20 else auth_header)
+    
     if not auth_header.startswith("Bearer "):
+        logger.error("[OIDC USERINFO] Invalid Authorization header format - missing 'Bearer ' prefix")
         raise InvalidGrantError("Invalid token: Missing or invalid Authorization header")
     
     token = auth_header[7:]
-    claims = OIDCService.validate_access_token(token)
-    g.current_token = claims
+    logger.debug("[OIDC USERINFO] Token extracted (first 50 chars): %s...", token[:50] if len(token) > 50 else token)
+    logger.debug("[OIDC USERINFO] Token length: %d", len(token))
     
-    user = User.query.get(claims.get("sub"))
+    try:
+        logger.debug("[OIDC USERINFO] Calling OIDCService.validate_access_token()...")
+        claims = OIDCService.validate_access_token(token)
+        logger.debug("[OIDC USERINFO] Token validation successful")
+        logger.debug("[OIDC USERINFO] Token claims: %s", claims)
+    except Exception as e:
+        logger.error("[OIDC USERINFO] Token validation failed: %s: %s", type(e).__name__, str(e))
+        raise
+    
+    g.current_token = claims
+    g.access_token = token  # Store the original access token for get_userinfo()
+    logger.debug("[OIDC USERINFO] g.current_token set")
+    
+    user_id = claims.get("sub")
+    logger.debug("[OIDC USERINFO] User ID from token: %s", user_id)
+    
+    user = User.query.get(user_id)
+    logger.debug("[OIDC USERINFO] User query result: %s", user)
+    
     if not user:
+        logger.error("[OIDC USERINFO] User not found in database: user_id=%s", user_id)
         raise InvalidGrantError("Invalid token: User not found")
     
     g.current_user = user
+    logger.debug("[OIDC USERINFO] g.current_user set: user_id=%s, email=%s", user.id, user.email)
+    logger.debug("[OIDC USERINFO] require_valid_token() completed successfully")
 
 
 def _check_password_hash(client, password):
@@ -175,10 +206,11 @@ def oidc_discovery():
     No authentication required.
     
     Returns:
-        200: OIDC discovery document
+        200: OIDC discovery document (application/json)
     """
     config = get_oidc_config()
     
+    # Return discovery document as application/json (per OpenID Connect Discovery 1.0)
     response = jsonify(config)
     response.headers["Cache-Control"] = "max-age=86400"
     return response, 200
@@ -217,8 +249,12 @@ def oidc_authorize():
         200: Login page (GET when not authenticated)
         400: Invalid request
     """
+    logger.debug("[OIDC] ===========================================")
     logger.debug("[OIDC] oidc_authorize called")
-
+    logger.debug("[OIDC] Current UTC time: %s", datetime.now(timezone.utc).isoformat() + "Z")
+    logger.debug("[OIDC] Request method: %s", request.method)
+    logger.debug("[OIDC] Request URL: %s", request.url)
+    logger.debug("[OIDC] Remote address: %s", request.remote_addr)
     
     # Parse request parameters
     if request.method == "GET":
@@ -227,6 +263,7 @@ def oidc_authorize():
         params = request.form.to_dict()
     
     logger.debug("[OIDC] Raw request params: %s", params)
+    
     # Extract required parameters
     logger.debug("[OIDC] Extracting request parameters...")
     client_id = params.get("client_id")
@@ -367,6 +404,7 @@ def oidc_authorize():
     
     # User is authenticated, generate authorization code
     logger.debug("[OIDC] User is authenticated, fetching user from database...")
+    logger.debug("[OIDC] Current UTC time before code generation: %s", datetime.now(timezone.utc).isoformat() + "Z")
     user = User.query.get(user_id)
     logger.debug("[OIDC] User query result: %s", user)
     
@@ -393,12 +431,17 @@ def oidc_authorize():
             user_agent=request.headers.get("User-Agent"),
         )
         logger.debug("[OIDC] Authorization code generated successfully: %s...", code[:20] if code else None)
+        logger.debug("[OIDC] Current UTC time after code generation: %s", datetime.now(timezone.utc).isoformat() + "Z")
     except Exception as e:
-        logger.debug("[OIDC] Authorization code generation failed: %s", str(e))
+        logger.error("[OIDC] Authorization code generation failed: %s", str(e))
+        logger.error("[OIDC] Current UTC time at failure: %s", datetime.now(timezone.utc).isoformat() + "Z")
+        import traceback
+        logger.error("[OIDC] Traceback: %s", traceback.format_exc())
         return _redirect_with_error(redirect_uri, "server_error", str(e), state)
     
     # Redirect with authorization code
     logger.debug("[OIDC] Redirecting with authorization code...")
+    logger.debug("[OIDC] Current UTC time before redirect: %s", datetime.now(timezone.utc).isoformat() + "Z")
     redirect_params = {"code": code}
     if state:
         redirect_params["state"] = state
@@ -406,6 +449,7 @@ def oidc_authorize():
     redirect_url = f"{redirect_uri}?{urlencode(redirect_params)}"
     logger.debug("[OIDC] Redirect URL: %s...", redirect_url[:100] if redirect_url else None)
     logger.debug("[OIDC] oidc_authorize completed successfully")
+    logger.debug("[OIDC] Final UTC time: %s", datetime.now(timezone.utc).isoformat() + "Z")
     logger.debug("[OIDC] ===========================================")
     
     return redirect(redirect_url)
@@ -544,14 +588,13 @@ def oidc_token():
     
     # Validate grant_type
     if not grant_type:
-        logger.error("[OIDC]   grant_type is requred")
-        return api_response(
-            success=False,
-            message="grant_type is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "grant_type is required"},
-        )
+        logger.error("[OIDC]   grant_type is required")
+        # RFC 6749 Section 5.2: Error response for invalid request
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "grant_type is required"
+        })
+        return response, 400
     
     # Authenticate client
     client_id = data.get("client_id")
@@ -600,46 +643,51 @@ def oidc_token():
     # Unsupported grant type
     else:
         logger.error("[OIDC]   Unsupported grant_type")
-        return api_response(
-            success=False,
-            message="Unsupported grant_type",
-            status=400,
-            error_type="UNSUPPORTED_GRANT_TYPE",
-            error_details={"error": "unsupported_grant_type", "error_description": f"Grant type '{grant_type}' is not supported"},
-        )
+        # RFC 6749 Section 5.2: Error response for unsupported grant type
+        response = jsonify({
+            "error": "unsupported_grant_type",
+            "error_description": f"Grant type '{grant_type}' is not supported"
+        })
+        return response, 400
 
 
 def _handle_authorization_code_grant(data, client):
     """Handle authorization_code grant type."""
+    logger.debug("[OIDC] ===========================================")
+    logger.debug("[OIDC] _handle_authorization_code_grant called")
+    logger.debug("[OIDC] Current UTC time: %s", datetime.now(timezone.utc).isoformat() + "Z")
+    
     code = data.get("code")
     redirect_uri = data.get("redirect_uri")
     code_verifier = data.get("code_verifier")
     
+    logger.debug("[OIDC] Code provided: %s", bool(code))
+    logger.debug("[OIDC] Redirect URI: %s", redirect_uri)
+    logger.debug("[OIDC] Code verifier provided: %s", bool(code_verifier))
+    
     if not code:
         logger.error("[OIDC]   code is required")
-        return api_response(
-            success=False,
-            message="code is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "code is required"},
-        )
+        # RFC 6749 Section 5.2: Error response for invalid request
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "code is required"
+        })
+        return response, 400
     
     if not redirect_uri:
         logger.error("[OIDC]   redirect_uri is required")
-        return api_response(
-            success=False,
-            message="redirect_uri is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "redirect_uri is required"},
-        )
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "redirect_uri is required"
+        })
+        return response, 400
     
     try:
         # Development-only debug logging for authorization code validation
         if current_app.config.get('ENV') == 'development':
             logger.debug(f"[OIDC] Authorization code validation: client_id={client.client_id}, code_provided=True")
         
+        logger.debug("[OIDC] Current UTC time before code validation: %s", datetime.now(timezone.utc).isoformat() + "Z")
         claims, user = OIDCService.validate_authorization_code(
             code=code,
             client_id=client.client_id,
@@ -649,29 +697,30 @@ def _handle_authorization_code_grant(data, client):
             user_agent=request.headers.get("User-Agent"),
         )
     except InvalidGrantError as e:
-        logger.error(f"[OIDC]   INVALID_GRANT: {str(e)}")
-        return api_response(
-            success=False,
-            message=str(e),
-            status=400,
-            error_type="INVALID_GRANT",
-            error_details={"error": "invalid_grant", "error_description": str(e)},
-        )
+        logger.error("[OIDC] INVALID_GRANT: %s", str(e))
+        logger.error("[OIDC] Current UTC time at validation failure: %s", datetime.now(timezone.utc).isoformat() + "Z")
+        # RFC 6749 Section 5.2: Error response for invalid grant
+        response = jsonify({
+            "error": "invalid_grant",
+            "error_description": str(e)
+        })
+        return response, 400
     except Exception as e:
-        logger.error(f"[OIDC]   Authorization code validation error: {type(e).__name__}: {str(e)}")
-        return api_response(
-            success=False,
-            message=str(e),
-            status=400,
-            error_type="INVALID_GRANT",
-            error_details={"error": "invalid_grant", "error_description": str(e)},
-        )
+        logger.error("[OIDC] Authorization code validation error: %s: %s", type(e).__name__, str(e))
+        logger.error("[OIDC] Current UTC time at validation error: %s", datetime.now(timezone.utc).isoformat() + "Z")
+        response = jsonify({
+            "error": "invalid_grant",
+            "error_description": str(e)
+        })
+        return response, 400
     
     # Generate tokens
     try:
         # Development-only debug logging for token generation
         if current_app.config.get('ENV') == 'development':
             logger.debug(f"[OIDC] Token generation: client_id={client.client_id}, user_id={claims['user_id']}, scope={claims['scope']}")
+        
+        logger.debug("[OIDC] Current UTC time before token generation: %s", datetime.now(timezone.utc).isoformat() + "Z")
         
         tokens = OIDCService.generate_tokens(
             client_id=client.client_id,
@@ -683,40 +732,64 @@ def _handle_authorization_code_grant(data, client):
             auth_time=int(__import__("time").time()),
         )
     except Exception as e:
-        logger.error(f"[OIDC]   Failed to generate tokens {str(e)}")
-        return api_response(
-            success=False,
-            message="Failed to generate tokens",
-            status=500,
-            error_type="SERVER_ERROR",
-            error_details={"error": "server_error", "error_description": str(e)},
-        )
+        logger.error("[OIDC] Failed to generate tokens: %s", str(e))
+        logger.error("[OIDC] Current UTC time at token generation failure: %s", datetime.now(timezone.utc).isoformat() + "Z")
+        response = jsonify({
+            "error": "server_error",
+            "error_description": str(e)
+        })
+        return response, 500
     
-    return api_response(
-        data=tokens,
-        message="Tokens issued successfully",
-        status=200,
-    )
+    # Return standard OAuth2/OIDC token response (application/json)
+    # Per RFC 6749 Section 5.1 and OIDC Core 1.0
+    logger.debug("[OIDC] Current UTC time after token generation: %s", datetime.now(timezone.utc).isoformat() + "Z")
+    logger.debug("[OIDC] _handle_authorization_code_grant completed successfully")
+    
+    # Echo tokens to console for diagnostics
+    print(f"[TOKEN DIAGNOSTICS] Authorization code exchange completed")
+    print(f"[TOKEN DIAGNOSTICS] Access Token: {tokens.get('access_token', '')}..." if len(tokens.get('access_token', '')) > 50 else f"[TOKEN DIAGNOSTICS] Access Token: {tokens.get('access_token', '')}")
+    print(f"[TOKEN DIAGNOSTICS] Token Type: {tokens.get('token_type', '')}")
+    print(f"[TOKEN DIAGNOSTICS] Expires In: {tokens.get('expires_in', '')}")
+    if 'id_token' in tokens:
+        print(f"[TOKEN DIAGNOSTICS] ID Token: {tokens['id_token']}..." if len(tokens['id_token']) > 50 else f"[TOKEN DIAGNOSTICS] ID Token: {tokens['id_token']}")
+    if 'refresh_token' in tokens:
+        print(f"[TOKEN DIAGNOSTICS] Refresh Token: {tokens['refresh_token'][:50]}..." if len(tokens['refresh_token']) > 50 else f"[TOKEN DIAGNOSTICS] Refresh Token: {tokens['refresh_token']}")
+    print(f"[TOKEN DIAGNOSTICS] Scope: {tokens.get('scope', '')}")
+    print(f"[TOKEN DIAGNOSTICS] ===========================================")
+    
+    logger.debug("[OIDC] ===========================================")
+    response = jsonify(tokens)
+    print(tokens)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response, 200
 
 
 def _handle_refresh_token_grant(data, client):
     """Handle refresh_token grant type."""
+    logger.debug("[OIDC] ===========================================")
+    logger.debug("[OIDC] _handle_refresh_token_grant called")
+    logger.debug("[OIDC] Current UTC time: %s", datetime.now(timezone.utc).isoformat() + "Z")
+    
     refresh_token = data.get("refresh_token")
     scope = data.get("scope")
     
+    logger.debug("[OIDC] Refresh token provided: %s", bool(refresh_token))
+    logger.debug("[OIDC] Scope: %s", scope)
+    
     if not refresh_token:
-        return api_response(
-            success=False,
-            message="refresh_token is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "refresh_token is required"},
-        )
+        # RFC 6749 Section 5.2: Error response for invalid request
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "refresh_token is required"
+        })
+        return response, 400
     
     # Parse scope if provided
     scope_list = scope.split() if scope else None
     
     try:
+        logger.debug("[OIDC] Current UTC time before token refresh: %s", datetime.now(timezone.utc).isoformat() + "Z")
         tokens = OIDCService.refresh_access_token(
             refresh_token=refresh_token,
             client_id=client.client_id,
@@ -725,19 +798,37 @@ def _handle_refresh_token_grant(data, client):
             user_agent=request.headers.get("User-Agent"),
         )
     except InvalidGrantError as e:
-        return api_response(
-            success=False,
-            message=str(e),
-            status=400,
-            error_type="INVALID_GRANT",
-            error_details={"error": "invalid_grant", "error_description": str(e)},
-        )
+        logger.error("[OIDC] Refresh token error: %s", str(e))
+        logger.error("[OIDC] Current UTC time at refresh failure: %s", datetime.now(timezone.utc).isoformat() + "Z")
+        # RFC 6749 Section 5.2: Error response for invalid grant
+        response = jsonify({
+            "error": "invalid_grant",
+            "error_description": str(e)
+        })
+        return response, 400
     
-    return api_response(
-        data=tokens,
-        message="Tokens refreshed successfully",
-        status=200,
-    )
+    # Return standard OAuth2/OIDC token response (application/json)
+    # Per RFC 6749 Section 5.1 and OIDC Core 1.0
+    logger.debug("[OIDC] Current UTC time after token refresh: %s", datetime.now(timezone.utc).isoformat() + "Z")
+    logger.debug("[OIDC] _handle_refresh_token_grant completed successfully")
+    
+    # Echo tokens to console for diagnostics
+    print(f"[TOKEN DIAGNOSTICS] Token refresh completed")
+    print(f"[TOKEN DIAGNOSTICS] Access Token: {tokens.get('access_token', '')[:50]}..." if len(tokens.get('access_token', '')) > 50 else f"[TOKEN DIAGNOSTICS] Access Token: {tokens.get('access_token', '')}")
+    print(f"[TOKEN DIAGNOSTICS] Token Type: {tokens.get('token_type', '')}")
+    print(f"[TOKEN DIAGNOSTICS] Expires In: {tokens.get('expires_in', '')}")
+    if 'id_token' in tokens:
+        print(f"[TOKEN DIAGNOSTICS] ID Token: {tokens['id_token'][:50]}..." if len(tokens['id_token']) > 50 else f"[TOKEN DIAGNOSTICS] ID Token: {tokens['id_token']}")
+    if 'refresh_token' in tokens:
+        print(f"[TOKEN DIAGNOSTICS] Refresh Token: {tokens['refresh_token'][:50]}..." if len(tokens['refresh_token']) > 50 else f"[TOKEN DIAGNOSTICS] Refresh Token: {tokens['refresh_token']}")
+    print(f"[TOKEN DIAGNOSTICS] Scope: {tokens.get('scope', '')}")
+    print(f"[TOKEN DIAGNOSTICS] ===========================================")
+    
+    logger.debug("[OIDC] ===========================================")
+    response = jsonify(tokens)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response, 200
 
 
 # ============================================================================
@@ -759,37 +850,72 @@ def oidc_userinfo():
         - email_verified: Email verification status (if "email" scope)
     
     Returns:
-        200: User claims
-        401: Invalid or insufficient token
+        200: User claims in JSON format (application/json)
+        401: Invalid or missing token (with WWW-Authenticate header per RFC 6750)
     """
+    logger.debug("[OIDC USERINFO] ===========================================")
+    logger.debug("[OIDC USERINFO] oidc_userinfo() endpoint called")
+    logger.debug("[OIDC USERINFO] Request method: %s", request.method)
+    logger.debug("[OIDC USERINFO] Request URL: %s", request.url)
+    logger.debug("[OIDC USERINFO] Request content_type: %s", request.content_type)
+    logger.debug("[OIDC USERINFO] Request headers: %s", dict(request.headers))
+    logger.debug("[OIDC USERINFO] Request args: %s", dict(request.args))
+    logger.debug("[OIDC USERINFO] Request form: %s", dict(request.form))
+    request_json = request.get_json(silent=True)
+    logger.debug("[OIDC USERINFO] Request json: %s", request_json)
+    logger.debug("[OIDC USERINFO] Request data length: %d bytes", len(request.get_data()))
+    
     try:
+        logger.debug("[OIDC USERINFO] Calling require_valid_token()...")
         require_valid_token()
+        logger.debug("[OIDC USERINFO] Token validation successful")
     except InvalidGrantError as e:
-        return api_response(
-            success=False,
-            message=str(e),
-            status=401,
-            error_type="INVALID_TOKEN",
-            error_details={"error": "invalid_token", "error_description": str(e)},
-        )
-    
-    # Get userinfo
-    try:
-        userinfo = OIDCService.get_userinfo(g.current_token.get("access_token", ""))
+        logger.error("[OIDC USERINFO] Token validation failed: %s", str(e))
+        # RFC 6750 Section 3: Return 401 with WWW-Authenticate header for invalid tokens
+        response = jsonify({
+            "error": "invalid_token",
+            "error_description": str(e)
+        })
+        response.headers["WWW-Authenticate"] = 'Bearer realm="OIDC UserInfo Endpoint", error="invalid_token", error_description="' + str(e) + '"'
+        return response, 401
     except Exception as e:
-        return api_response(
-            success=False,
-            message="Failed to get user info",
-            status=500,
-            error_type="SERVER_ERROR",
-            error_details={"error": "server_error", "error_description": str(e)},
-        )
+        logger.error("[OIDC USERINFO] Unexpected error during token validation: %s: %s", type(e).__name__, str(e))
+        response = jsonify({
+            "error": "server_error",
+            "error_description": str(e)
+        })
+        response.headers["WWW-Authenticate"] = 'Bearer realm="OIDC UserInfo Endpoint", error="server_error"'
+        return response, 500
     
-    return api_response(
-        data=userinfo,
-        message="User info retrieved successfully",
-        status=200,
-    )
+    logger.debug("[OIDC USERINFO] g.current_token: %s", g.current_token)
+    logger.debug("[OIDC USERINFO] g.current_user: user_id=%s, email=%s", g.current_user.id, g.current_user.email)
+    
+    # Get userinfo using the original access token
+    access_token = g.access_token
+    logger.debug("[OIDC USERINFO] Access token from g.access_token: %s...", access_token[:50] if len(access_token) > 50 else access_token)
+    
+    try:
+        logger.debug("[OIDC USERINFO] Calling OIDCService.get_userinfo()...")
+        userinfo = OIDCService.get_userinfo(access_token)
+        logger.debug("[OIDC USERINFO] Userinfo retrieved successfully: %s", userinfo)
+    except Exception as e:
+        logger.error("[OIDC USERINFO] Failed to get user info: %s: %s", type(e).__name__, str(e))
+        import traceback
+        logger.error("[OIDC USERINFO] Traceback: %s", traceback.format_exc())
+        response = jsonify({
+            "error": "server_error",
+            "error_description": str(e)
+        })
+        return response, 500
+    
+    logger.debug("[OIDC USERINFO] Returning userinfo response")
+    logger.debug("[OIDC USERINFO] ===========================================")
+    
+    # Return standard OIDC UserInfo response (application/json)
+    # Per OpenID Connect Core 1.0 Section 5.3, response is a JSON object
+    response = jsonify(userinfo)
+    response.headers["Cache-Control"] = "no-cache, no-store"
+    return response, 200
 
 
 # ============================================================================
@@ -806,19 +932,18 @@ def oidc_jwks():
     No authentication required.
     
     Returns:
-        200: JWKS document
+        200: JWKS document (application/json)
     """
     try:
         jwks = OIDCService.get_jwks()
     except Exception as e:
-        return api_response(
-            success=False,
-            message="Failed to get JWKS",
-            status=500,
-            error_type="SERVER_ERROR",
-            error_details={"error": "server_error", "error_description": str(e)},
-        )
+        response = jsonify({
+            "error": "server_error",
+            "error_description": str(e)
+        })
+        return response, 500
     
+    # Return JWKS as application/json (per OpenID Connect Discovery 1.0)
     response = jsonify(jwks)
     response.headers["Cache-Control"] = "max-age=3600"
     return response, 200
@@ -858,13 +983,12 @@ def oidc_revoke():
     token = data.get("token")
     
     if not token:
-        return api_response(
-            success=False,
-            message="token is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "token is required"},
-        )
+        # RFC 7009 Section 2.1: Error response for invalid request
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "token is required"
+        })
+        return response, 400
     
     # Authenticate client
     client_id = data.get("client_id")
@@ -901,13 +1025,11 @@ def oidc_revoke():
             user_agent=request.headers.get("User-Agent"),
         )
     except Exception as e:
-        # Revocation should succeed even if token is invalid
+        # Revocation should succeed even if token is invalid (RFC 7009)
         pass
     
-    return api_response(
-        message="Token revoked successfully",
-        status=200,
-    )
+    # RFC 7009 Section 2.2: Successful revocation returns empty body with 200
+    return "", 200
 
 
 # ============================================================================
@@ -944,13 +1066,12 @@ def oidc_introspect():
     token = data.get("token")
     
     if not token:
-        return api_response(
-            success=False,
-            message="token is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "token is required"},
-        )
+        # RFC 7009 Section 2.1: Error response for invalid request
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "token is required"
+        })
+        return response, 400
     
     # Authenticate client
     client_id = data.get("client_id")
@@ -986,19 +1107,17 @@ def oidc_introspect():
             user_agent=request.headers.get("User-Agent"),
         )
     except Exception as e:
-        return api_response(
-            success=False,
-            message="Failed to introspect token",
-            status=500,
-            error_type="SERVER_ERROR",
-            error_details={"error": "server_error", "error_description": str(e)},
-        )
+        # RFC 7009 Section 2.2: Error response
+        response = jsonify({
+            "error": "server_error",
+            "error_description": str(e)
+        })
+        return response, 500
     
-    return api_response(
-        data=result,
-        message="Token introspection successful",
-        status=200,
-    )
+    # RFC 7009 Section 2.3: Return introspection response (application/json)
+    response = jsonify(result)
+    response.headers["Cache-Control"] = "no-cache, no-store"
+    return response, 200
 
 
 # ============================================================================
@@ -1030,22 +1149,18 @@ def oidc_register():
     redirect_uris = data.get("redirect_uris", [])
     
     if not client_name:
-        return api_response(
-            success=False,
-            message="client_name is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "client_name is required"},
-        )
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "client_name is required"
+        })
+        return response, 400
     
     if not redirect_uris:
-        return api_response(
-            success=False,
-            message="redirect_uris is required",
-            status=400,
-            error_type="INVALID_REQUEST",
-            error_details={"error": "invalid_request", "error_description": "redirect_uris is required"},
-        )
+        response = jsonify({
+            "error": "invalid_request",
+            "error_description": "redirect_uris is required"
+        })
+        return response, 400
     
     # Validate redirect_uris
     for uri in redirect_uris:
@@ -1054,13 +1169,11 @@ def oidc_register():
             if not parsed.scheme or not parsed.netloc:
                 raise ValueError(f"Invalid redirect URI: {uri}")
         except Exception:
-            return api_response(
-                success=False,
-                message=f"Invalid redirect_uri: {uri}",
-                status=400,
-                error_type="INVALID_REQUEST",
-                error_details={"error": "invalid_request", "error_description": f"Invalid redirect_uri: {uri}"},
-            )
+            response = jsonify({
+                "error": "invalid_request",
+                "error_description": f"Invalid redirect_uri: {uri}"
+            })
+            return response, 400
     
     # Generate client credentials
     client_id = f"oidc_{secrets.token_urlsafe(16)}"
@@ -1092,7 +1205,7 @@ def oidc_register():
         redirect_uris=redirect_uris,
         grant_types=data.get("grant_types", ["authorization_code", "refresh_token"]),
         response_types=data.get("response_types", ["code"]),
-        scopes=data.get("scope", "openid profile email").split(),
+        scopes=data.get("scope", "openid profile email roles").split(),
         token_endpoint_auth_method=data.get("token_endpoint_auth_method", "client_secret_basic"),
         is_active=True,
         is_confidential=True,
@@ -1105,19 +1218,16 @@ def oidc_register():
     client.save()
     
     # Return client credentials
-    return api_response(
-        data={
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "client_id_issued_at": int(__import__("time").time()),
-            "client_secret_expires_at": 0,  # Never expires
-            "client_name": client_name,
-            "redirect_uris": redirect_uris,
-            "token_endpoint_auth_method": data.get("token_endpoint_auth_method", "client_secret_basic"),
-            "grant_types": client.grant_types,
-            "response_types": client.response_types,
-            "scope": " ".join(client.scopes),
-        },
-        message="Client registered successfully",
-        status=201,
-    )
+    response = jsonify({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "client_id_issued_at": int(__import__("time").time()),
+        "client_secret_expires_at": 0,  # Never expires
+        "client_name": client_name,
+        "redirect_uris": redirect_uris,
+        "token_endpoint_auth_method": data.get("token_endpoint_auth_method", "client_secret_basic"),
+        "grant_types": client.grant_types,
+        "response_types": client.response_types,
+        "scope": " ".join(client.scopes),
+    })
+    return response, 201

@@ -1,5 +1,5 @@
 """OIDC Session model for OIDC session tracking."""
-from datetime import datetime
+from datetime import datetime, timezone
 from app.extensions import db
 from app.models.base import BaseModel
 
@@ -49,7 +49,7 @@ class OIDCSession(BaseModel):
 
     def is_expired(self):
         """Check if the OIDC session has expired."""
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def is_authenticated(self):
         """Check if the user has been authenticated in this session."""
@@ -57,7 +57,7 @@ class OIDCSession(BaseModel):
 
     def mark_authenticated(self):
         """Mark the session as authenticated."""
-        self.authenticated_at = datetime.utcnow()
+        self.authenticated_at = datetime.now(timezone.utc)
         db.session.commit()
 
     def validate_nonce(self, expected_nonce):
@@ -126,7 +126,7 @@ class OIDCSession(BaseModel):
             nonce=nonce,
             code_challenge=code_challenge,
             code_challenge_method=code_challenge_method,
-            expires_at=datetime.utcnow() + timedelta(seconds=lifetime_seconds),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds),
         )
         db.session.add(session)
         db.session.commit()

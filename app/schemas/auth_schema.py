@@ -55,3 +55,34 @@ class ResetPasswordSchema(Schema):
         """Validate that passwords match."""
         if data.get("password") != data.get("password_confirm"):
             raise ValidationError("Passwords do not match", field_name="password_confirm")
+
+
+class TOTPVerifyEnrollmentSchema(Schema):
+    """Schema for TOTP enrollment verification."""
+
+    code = fields.Str(
+        required=True,
+        validate=validate.Regexp(
+            r"^\d{6}$",
+            error="Code must be a 6-digit number",
+        ),
+    )
+
+
+class TOTPVerifySchema(Schema):
+    """Schema for TOTP code verification during login."""
+
+    code = fields.Str(required=True)
+    is_backup_code = fields.Bool(missing=False)
+
+
+class TOTPDisableSchema(Schema):
+    """Schema for disabling TOTP."""
+
+    password = fields.Str(required=True, validate=validate.Length(min=1))
+
+
+class TOTPRegenerateBackupCodesSchema(Schema):
+    """Schema for regenerating backup codes."""
+
+    password = fields.Str(required=True, validate=validate.Length(min=1))

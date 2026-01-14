@@ -1,5 +1,5 @@
 """OIDC Refresh Token model for token rotation."""
-from datetime import datetime
+from datetime import datetime, timezone
 from app.extensions import db
 from app.models.base import BaseModel
 
@@ -58,7 +58,11 @@ class OIDCRefreshToken(BaseModel):
 
     def is_expired(self):
         """Check if the refresh token has expired."""
-        return datetime.utcnow() > self.expires_at
+        # Handle both timezone-aware and timezone-naive expires_at values
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires_at
 
     def is_revoked(self):
         """Check if the refresh token has been revoked."""
@@ -74,7 +78,7 @@ class OIDCRefreshToken(BaseModel):
         Args:
             reason: Optional reason for revocation
         """
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(timezone.utc)
         self.revoked_reason = reason
         db.session.commit()
 
@@ -93,7 +97,7 @@ class OIDCRefreshToken(BaseModel):
         self.rotation_count += 1
         # Extend expiration on rotation
         from datetime import timedelta
-        self.expires_at = datetime.utcnow() + timedelta(days=30)
+        self.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
         db.session.commit()
         return self
 
@@ -123,7 +127,7 @@ class OIDCRefreshToken(BaseModel):
             token_hash=token_hash,
             scope=scope,
             access_token_id=access_token_id,
-            expires_at=datetime.utcnow() + timedelta(seconds=lifetime_seconds),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds),
             ip_address=ip_address,
             user_agent=user_agent,
         )

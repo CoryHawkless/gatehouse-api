@@ -1,5 +1,5 @@
 """Session model."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.extensions import db
 from app.models.base import BaseModel
 from app.utils.constants import SessionStatus
@@ -34,7 +34,7 @@ class Session(BaseModel):
 
     def is_active(self):
         """Check if session is currently active."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return (
             self.status == SessionStatus.ACTIVE
             and self.expires_at > now
@@ -43,7 +43,7 @@ class Session(BaseModel):
 
     def is_expired(self):
         """Check if session has expired."""
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def refresh(self, duration_seconds=86400):
         """
@@ -52,8 +52,8 @@ class Session(BaseModel):
         Args:
             duration_seconds: New session duration in seconds
         """
-        self.expires_at = datetime.utcnow() + timedelta(seconds=duration_seconds)
-        self.last_activity_at = datetime.utcnow()
+        self.expires_at = datetime.now(timezone.utc) + timedelta(seconds=duration_seconds)
+        self.last_activity_at = datetime.now(timezone.utc)
         db.session.commit()
 
     def revoke(self, reason=None):
@@ -64,7 +64,7 @@ class Session(BaseModel):
             reason: Optional reason for revocation
         """
         self.status = SessionStatus.REVOKED
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(timezone.utc)
         if reason:
             self.revoked_reason = reason
         db.session.commit()

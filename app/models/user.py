@@ -59,3 +59,35 @@ class User(BaseModel):
     def get_organizations(self):
         """Get all organizations the user is a member of."""
         return [membership.organization for membership in self.organization_memberships]
+
+    def has_totp_enabled(self) -> bool:
+        """Check if user has TOTP enabled and verified.
+
+        Returns:
+            True if user has a verified TOTP authentication method, False otherwise.
+        """
+        from app.models.authentication_method import AuthenticationMethod
+        from app.utils.constants import AuthMethodType
+
+        return (
+            AuthenticationMethod.query.filter_by(
+                user_id=self.id,
+                method_type=AuthMethodType.TOTP,
+                verified=True,
+                deleted_at=None,
+            ).first()
+            is not None
+        )
+
+    def get_totp_method(self):
+        """Get user's TOTP authentication method.
+
+        Returns:
+            The AuthenticationMethod instance for TOTP or None if not found.
+        """
+        from app.models.authentication_method import AuthenticationMethod
+        from app.utils.constants import AuthMethodType
+
+        return AuthenticationMethod.query.filter_by(
+            user_id=self.id, method_type=AuthMethodType.TOTP, deleted_at=None
+        ).first()

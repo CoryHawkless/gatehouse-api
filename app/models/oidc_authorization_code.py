@@ -1,5 +1,5 @@
 """OIDC Authorization Code model for auth code flow."""
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.extensions import db
 from app.models.base import BaseModel
 
@@ -49,7 +49,12 @@ class OIDCAuthCode(BaseModel):
 
     def is_expired(self):
         """Check if the authorization code has expired."""
-        return datetime.utcnow() > self.expires_at
+        # Handle both timezone-aware and timezone-naive expires_at values
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            # Make naive datetime timezone-aware (UTC)
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires_at
 
     def is_valid(self):
         """Check if the authorization code is valid for use."""
@@ -58,7 +63,7 @@ class OIDCAuthCode(BaseModel):
     def mark_as_used(self):
         """Mark the authorization code as used."""
         self.is_used = True
-        self.used_at = datetime.utcnow()
+        self.used_at = datetime.now(timezone.utc)
         db.session.commit()
 
     @classmethod
@@ -90,7 +95,7 @@ class OIDCAuthCode(BaseModel):
             scope=scope,
             nonce=nonce,
             code_verifier=code_verifier,
-            expires_at=datetime.utcnow() + timedelta(seconds=lifetime_seconds),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=lifetime_seconds),
             ip_address=ip_address,
             user_agent=user_agent,
         )
