@@ -19,10 +19,10 @@ class AuthenticationMethod(BaseModel):
     provider_user_id = db.Column(db.String(255), nullable=True)
     provider_data = db.Column(db.JSON, nullable=True)
 
-    # # For TOTP authentication
-    # totp_secret = db.Column(db.String(32), nullable=True)
-    # totp_backup_codes = db.Column(db.JSON, nullable=True)
-    # totp_verified_at = db.Column(db.DateTime, nullable=True)
+    # For TOTP authentication
+    totp_secret = db.Column(db.String(32), nullable=True)
+    totp_backup_codes = db.Column(db.JSON, nullable=True)
+    totp_verified_at = db.Column(db.DateTime, nullable=True)
 
     # Metadata
     is_primary = db.Column(db.Boolean, default=False, nullable=False)

@@ -1,7 +1,7 @@
 """Authentication service."""
 import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import request, g, current_app
 from app.extensions import db, bcrypt
 from app.models.user import User
@@ -131,9 +131,9 @@ class AuthService:
             raise InvalidCredentialsError()
 
         # Update last login
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         user.last_login_ip = request.remote_addr
-        auth_method.last_used_at = datetime.utcnow()
+        auth_method.last_used_at = datetime.now(timezone.utc)
         db.session.commit()
 
         return user
@@ -160,8 +160,8 @@ class AuthService:
             status=SessionStatus.ACTIVE,
             ip_address=request.remote_addr,
             user_agent=request.headers.get("User-Agent"),
-            expires_at=datetime.utcnow() + timedelta(seconds=duration_seconds),
-            last_activity_at=datetime.utcnow(),
+            expires_at=datetime.now(timezone.utc) + timedelta(seconds=duration_seconds),
+            last_activity_at=datetime.now(timezone.utc),
         )
         session.save()
 
@@ -260,6 +260,14 @@ class AuthService:
         if user.has_totp_enabled():
             raise ConflictError("TOTP is already enabled for this account")
 
+        # Clean up any existing unverified TOTP enrollment attempts
+        # Use hard delete for unverified methods since they're incomplete enrollment attempts
+        existing_totp_method = user.get_totp_method()
+        if existing_totp_method and not existing_totp_method.verified:
+            logger.debug(f"Removing existing unverified TOTP method for user {user.id}")
+            db.session.delete(existing_totp_method)  # Hard delete - unverified methods are temporary
+            db.session.commit()  # Commit to ensure deletion before creating new record
+
         # Generate TOTP secret
         secret = TOTPService.generate_secret()
 
@@ -339,7 +347,7 @@ class AuthService:
 
         # Mark TOTP as verified
         auth_method.verified = True
-        auth_method.totp_verified_at = datetime.utcnow()
+        auth_method.totp_verified_at = datetime.now(timezone.utc)
         db.session.commit()
 
         # Log TOTP enrollment completion
@@ -436,8 +444,10 @@ class AuthService:
                     "secret": auth_method.provider_data.get("secret"),
                     "backup_codes": remaining_codes,
                 }
-                auth_method.last_used_at = datetime.utcnow()
+                auth_method.last_used_at = datetime.now(timezone.utc)
+                db.session.add(auth_method)
                 db.session.commit()
+                logger.debug(f"[BACKUP CODE] Updated provider_data: {auth_method.provider_data}")
 
                 # Log backup code usage
                 AuditService.log_action(
@@ -470,7 +480,7 @@ class AuthService:
             is_valid = TOTPService.verify_code(secret, code)
 
             if is_valid:
-                auth_method.last_used_at = datetime.utcnow()
+                auth_method.last_used_at = datetime.now(timezone.utc)
                 db.session.commit()
 
                 # Log successful verification

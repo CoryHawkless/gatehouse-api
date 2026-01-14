@@ -84,10 +84,14 @@ class User(BaseModel):
 
         Returns:
             The AuthenticationMethod instance for TOTP or None if not found.
+            
+        Note:
+            Returns the most recently created TOTP method to handle cases where
+            multiple enrollment attempts may exist.
         """
         from app.models.authentication_method import AuthenticationMethod
         from app.utils.constants import AuthMethodType
 
         return AuthenticationMethod.query.filter_by(
             user_id=self.id, method_type=AuthMethodType.TOTP, deleted_at=None
-        ).first()
+        ).order_by(AuthenticationMethod.created_at.desc()).first()

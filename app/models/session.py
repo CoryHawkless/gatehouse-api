@@ -21,7 +21,7 @@ class Session(BaseModel):
 
     # Timing
     expires_at = db.Column(db.DateTime, nullable=False)
-    last_activity_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_activity_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     revoked_at = db.Column(db.DateTime, nullable=True)
     revoked_reason = db.Column(db.String(255), nullable=True)
 
@@ -35,15 +35,24 @@ class Session(BaseModel):
     def is_active(self):
         """Check if session is currently active."""
         now = datetime.now(timezone.utc)
+        # Make expires_at timezone-aware if it's naive
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
         return (
             self.status == SessionStatus.ACTIVE
-            and self.expires_at > now
+            and expires_at > now
             and self.deleted_at is None
         )
 
     def is_expired(self):
         """Check if session has expired."""
-        return datetime.now(timezone.utc) > self.expires_at
+        now = datetime.now(timezone.utc)
+        # Make expires_at timezone-aware if it's naive
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return now > expires_at
 
     def refresh(self, duration_seconds=86400):
         """

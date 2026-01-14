@@ -221,6 +221,8 @@ def initialize_oidc_jwks(app):
     """Initialize OIDC JWKS service with a signing key.
     
     This ensures that signing keys are available for token generation.
+    Keys are loaded from the database if available, otherwise a new key
+    is generated and persisted to the database.
     
     Args:
         app: Flask application instance
@@ -228,11 +230,9 @@ def initialize_oidc_jwks(app):
     with app.app_context():
         try:
             jwks_service = OIDCJWKSService()
-            signing_key = jwks_service.get_signing_key()
-            if not signing_key:
-                signing_key = jwks_service.initialize_with_key()
-                app.logger.info(f"[OIDC] Generated new signing key: kid={signing_key.kid}")
-            else:
-                app.logger.info(f"[OIDC] Using existing signing key: kid={signing_key.kid}")
+            # Use initialize_with_key which handles loading from DB
+            # or generating a new key if none exists
+            signing_key = jwks_service.initialize_with_key()
+            app.logger.info(f"[OIDC] Signing key initialized: kid={signing_key.kid}")
         except Exception as e:
             app.logger.error(f"[OIDC] Failed to initialize JWKS: {e}")

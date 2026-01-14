@@ -3,6 +3,7 @@ import base64
 import io
 import logging
 import secrets
+from datetime import datetime, timezone
 from typing import Tuple
 
 import pyotp
@@ -72,10 +73,34 @@ class TOTPService:
             The window parameter allows for clock skew between the server
             and the authenticator app. A window of 1 allows codes from
             the previous, current, and next 30-second intervals.
+            
+            IMPORTANT: Always uses UTC time for verification to ensure
+            consistency across all timezones.
         """
         totp = pyotp.TOTP(secret)
-        is_valid = totp.verify(code, valid_window=window)
-        logger.debug(f"TOTP code verification: valid={is_valid}, window={window}")
+        # Use timezone-aware UTC datetime for verification
+        # IMPORTANT: We must pass a datetime object, NOT a Unix timestamp
+        # pyotp's internal datetime.utcfromtimestamp() is deprecated and can be
+        # affected by local timezone settings, causing the 10.5 hour skew issue
+        utc_now = datetime.now(timezone.utc)
+        
+        # DEBUG: Log detailed timezone information
+        logger.debug(f"[TOTP DEBUG] UTC now: {utc_now}")
+        logger.debug(f"[TOTP DEBUG] UTC now isoformat: {utc_now.isoformat()}")
+        logger.debug(f"[TOTP DEBUG] UTC timestamp: {utc_now.timestamp()}")
+        logger.debug(f"[TOTP DEBUG] UTC now tzinfo: {utc_now.tzinfo}")
+        
+        # Generate what the TOTP code should be at this moment using UTC datetime
+        expected_code = totp.at(utc_now)
+        logger.debug(f"[TOTP DEBUG] Expected TOTP code at UTC: {expected_code}")
+        
+        # Verify with the provided code using UTC datetime object
+        # Passing a datetime object avoids pyotp's utcfromtimestamp() issues
+        is_valid = totp.verify(code, valid_window=window, for_time=utc_now)
+        
+        logger.debug(f"[TOTP DEBUG] TOTP code verification: valid={is_valid}, window={window}")
+        logger.debug(f"[TOTP DEBUG] Provided code: {code}, Expected code: {expected_code}")
+        
         return is_valid
 
     @staticmethod
@@ -133,15 +158,16 @@ class TOTPService:
 
         for hashed_code in hashed_codes:
             if bcrypt.check_password_hash(hashed_code, code):
-                # Code found and valid - don't add to remaining codes (consumed)
-                logger.debug("Backup code verified and consumed")
-                return True, remaining_codes
+                # Code found and valid - mark as matched but don't add to remaining codes
+                matched = True
             else:
                 # Code doesn't match - keep it in remaining codes
                 remaining_codes.append(hashed_code)
 
-        logger.debug("Backup code verification failed")
-        return False, remaining_codes
+        if matched:
+            return True, remaining_codes
+        else:
+            return False, remaining_codes
 
     @staticmethod
     def generate_qr_code_data_uri(provisioning_uri: str) -> str:

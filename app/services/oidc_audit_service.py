@@ -1,5 +1,5 @@
 """OIDC Audit Service for comprehensive OIDC event logging."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from flask import g
@@ -374,7 +374,7 @@ class OIDCAuditService:
         """
         from datetime import timedelta
         
-        start_date = datetime.utcnow() - timedelta(days=days)
+        start_date = datetime.now(timezone.utc) - timedelta(days=days)
         
         query = OIDCAuditLog.query.filter(
             OIDCAuditLog.created_at >= start_date

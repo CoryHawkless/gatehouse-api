@@ -1,6 +1,6 @@
 """Organization service."""
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import current_app
 from app.extensions import db
 from app.models.organization import Organization
@@ -53,7 +53,7 @@ class OrganizationService:
             user_id=owner_user_id,
             organization_id=org.id,
             role=OrganizationRole.OWNER,
-            joined_at=datetime.utcnow(),
+            joined_at=datetime.now(timezone.utc),
         )
         member.save()
 
@@ -208,8 +208,8 @@ class OrganizationService:
             organization_id=org.id,
             role=role,
             invited_by_id=inviter_id,
-            invited_at=datetime.utcnow(),
-            joined_at=datetime.utcnow(),
+            invited_at=datetime.now(timezone.utc),
+            joined_at=datetime.now(timezone.utc),
         )
         member.save()
 

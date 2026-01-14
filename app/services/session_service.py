@@ -1,5 +1,5 @@
 """Session service."""
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models.session import Session
 from app.utils.constants import SessionStatus
 
@@ -41,7 +41,7 @@ class SessionService:
 
         if active_only:
             query = query.filter_by(status=SessionStatus.ACTIVE).filter(
-                Session.expires_at > datetime.utcnow()
+                Session.expires_at > datetime.now(timezone.utc)
             )
 
         return query.all()
@@ -65,7 +65,7 @@ class SessionService:
         """Clean up expired sessions."""
         expired_sessions = Session.query.filter(
             Session.status == SessionStatus.ACTIVE,
-            Session.expires_at < datetime.utcnow(),
+            Session.expires_at < datetime.now(timezone.utc),
             Session.deleted_at.is_(None),
         ).all()
 
