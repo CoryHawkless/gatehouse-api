@@ -6,10 +6,13 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 import os
-from app import create_app
+from gatehouse_app import create_app
 
 # Create application instance
-app = create_app(os.getenv("FLASK_ENV", "development"))
+application = create_app(os.getenv("FLASK_ENV", "development"))
+
+# For backwards compatibility
+app = application
 
 if __name__ == "__main__":
     app.run()

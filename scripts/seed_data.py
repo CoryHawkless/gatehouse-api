@@ -13,16 +13,16 @@ from dotenv import load_dotenv
 # Load environment variables FIRST before any app imports
 load_dotenv()
 
-from app import create_app
-from app.extensions import db
-from app.models.user import User
-from app.models.organization import Organization
-from app.models.organization_member import OrganizationMember
-from app.models.authentication_method import AuthenticationMethod
-from app.models.oidc_client import OIDCClient
-from app.services.auth_service import AuthService
-from app.services.organization_service import OrganizationService
-from app.utils.constants import OrganizationRole, UserStatus, AuthMethodType
+from gatehouse_app import create_app
+from gatehouse_app.extensions import db
+from gatehouse_app.models.user import User
+from gatehouse_app.models.organization import Organization
+from gatehouse_app.models.organization_member import OrganizationMember
+from gatehouse_app.models.authentication_method import AuthenticationMethod
+from gatehouse_app.models.oidc_client import OIDCClient
+from gatehouse_app.services.auth_service import AuthService
+from gatehouse_app.services.organization_service import OrganizationService
+from gatehouse_app.utils.constants import OrganizationRole, UserStatus, AuthMethodType
 
 # Create application
 app = create_app()
@@ -121,7 +121,7 @@ def create_or_get_oidc_client(org_id, name, client_id, client_secret,
                                redirect_uris, grant_types, response_types, scopes,
                                **kwargs):
     """Create an OIDC client if it doesn't exist, or return existing client."""
-    from app.extensions import bcrypt
+    from gatehouse_app.extensions import bcrypt
     
     existing = OIDCClient.query.filter_by(client_id=client_id, deleted_at=None).first()
     if existing:
@@ -473,7 +473,7 @@ def seed_data():
                 require_pkce=True,
                 access_token_lifetime=1800,  # 30 minutes
                 refresh_token_lifetime=604800,  # 7 days
-                id_token_lifetime=1800,  # 30 minutes
+                id_token_lifetime=1800,  # 30 minutes,
             )
             oidc_clients["acme-mobile"] = acme_mobile_client
         

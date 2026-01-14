@@ -1,10 +1,10 @@
 """Pytest configuration and fixtures."""
 import pytest
-from app import create_app
-from app.extensions import db as _db
-from app.models import User, Organization, OrganizationMember
-from app.services.auth_service import AuthService
-from app.utils.constants import OrganizationRole
+from gatehouse_app import create_app
+from gatehouse_app.extensions import db as _db
+from gatehouse_app.models import User, Organization, OrganizationMember
+from gatehouse_app.services.auth_service import AuthService
+from gatehouse_app.utils.constants import OrganizationRole
 
 
 @pytest.fixture(scope="session")
@@ -52,7 +52,7 @@ def test_user(db):
 @pytest.fixture(scope="function")
 def test_organization(db, test_user):
     """Create a test organization."""
-    from app.services.organization_service import OrganizationService
+    from gatehouse_app.services.organization_service import OrganizationService
 
     org = OrganizationService.create_organization(
         name="Test Organization",

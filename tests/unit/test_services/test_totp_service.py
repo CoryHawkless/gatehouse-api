@@ -1,7 +1,7 @@
 """Unit tests for TOTPService."""
 import base64
 import pytest
-from app.services.totp_service import TOTPService
+from gatehouse_app.services.totp_service import TOTPService
 
 
 @pytest.mark.unit

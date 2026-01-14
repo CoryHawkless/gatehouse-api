@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 from flask.cli import FlaskGroup
-from app import create_app
+from gatehouse_app import create_app
 
 # Create application
 app = create_app(os.getenv("FLASK_ENV", "development"))

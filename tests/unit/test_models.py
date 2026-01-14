@@ -1,8 +1,8 @@
 """Unit tests for models."""
 import pytest
 from datetime import datetime
-from app.models import User, Organization
-from app.utils.constants import UserStatus
+from gatehouse_app.models import User, Organization
+from gatehouse_app.utils.constants import UserStatus
 
 
 @pytest.mark.unit

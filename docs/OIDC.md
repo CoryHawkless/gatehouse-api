@@ -1454,7 +1454,7 @@ for key in jwks["keys"]:
 ```bash
 # Test database connection
 export DATABASE_URL="postgresql://user:pass@localhost:5432/authy2"
-python -c "from app import create_app; app = create_app(); app.test_request_context().push()"
+python -c "create_app create_app; app = create_app(); app.test_request_context().push()"
 ```
 
 #### Migration Issues

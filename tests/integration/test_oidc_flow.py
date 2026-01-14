@@ -100,7 +100,7 @@ class TestOIDCJWKS:
 
     def test_jwks_contains_signing_key(self, client, app):
         """Test that JWKS contains a valid signing key."""
-        from app.services.oidc_jwks_service import OIDCJWKSService
+        from gatehouse_app.services.oidc_jwks_service import OIDCJWKSService
         
         with app.app_context():
             # Initialize with a key
@@ -201,7 +201,7 @@ class TestOIDCAuthorizationCodeFlow:
     @pytest.fixture
     def test_client(self, client, test_organization, test_user):
         """Create a test OIDC client."""
-        from app.models import OIDCClient
+        from gatehouse_app.models import OIDCClient
         
         client_data = OIDCClient(
             organization_id=test_organization.id,
@@ -217,7 +217,7 @@ class TestOIDCAuthorizationCodeFlow:
             is_confidential=True,
             require_pkce=True,
         )
-        from app.extensions import db
+        from gatehouse_app.extensions import db
         db.session.add(client_data)
         db.session.commit()
         
@@ -338,9 +338,9 @@ class TestOIDCAuthorizationCodeFlow:
 
     def test_authorization_code_exchange_success(self, client, app, test_client, test_user):
         """Test successful token exchange with authorization code."""
-        from app.services.oidc_service import OIDCService
-        from app.models import OIDCAuthCode
-        from app.extensions import db
+        from gatehouse_app.services.oidc_service import OIDCService
+        from gatehouse_app.models import OIDCAuthCode
+        from gatehouse_app.extensions import db
         
         # First, generate an authorization code
         with app.app_context():
@@ -419,7 +419,7 @@ class TestOIDCAuthorizationCodeFlow:
 
     def test_token_exchange_pkce_verification(self, client, app, test_client, test_user):
         """Test PKCE verification during token exchange."""
-        from app.services.oidc_service import OIDCService
+        from gatehouse_app.services.oidc_service import OIDCService
         
         # Generate PKCE pair
         code_verifier, code_challenge = self._generate_pkce_pair()
@@ -456,7 +456,7 @@ class TestOIDCAuthorizationCodeFlow:
 
     def test_token_exchange_with_pkce_verifier(self, client, app, test_client, test_user):
         """Test successful token exchange with valid PKCE code verifier."""
-        from app.services.oidc_service import OIDCService
+        from gatehouse_app.services.oidc_service import OIDCService
         
         # Generate PKCE pair
         code_verifier, code_challenge = self._generate_pkce_pair()
@@ -499,8 +499,8 @@ class TestOIDCUserInfo:
     @pytest.fixture
     def test_client_with_user(self, client, test_organization, test_user):
         """Create a test OIDC client and get tokens."""
-        from app.models import OIDCClient
-        from app.services.oidc_service import OIDCService
+        from gatehouse_app.models import OIDCClient
+        from gatehouse_app.services.oidc_service import OIDCService
         
         client_data = OIDCClient(
             organization_id=test_organization.id,
@@ -516,7 +516,7 @@ class TestOIDCUserInfo:
             is_confidential=False,
             require_pkce=False,
         )
-        from app.extensions import db
+        from gatehouse_app.extensions import db
         db.session.add(client_data)
         db.session.commit()
         
@@ -569,8 +569,8 @@ class TestOIDCUserInfo:
 
     def test_userinfo_claims_by_scope(self, client, app, test_organization, test_user):
         """Test UserInfo returns correct claims based on scopes."""
-        from app.models import OIDCClient
-        from app.services.oidc_service import OIDCService
+        from gatehouse_app.models import OIDCClient
+        from gatehouse_app.services.oidc_service import OIDCService
         
         # Create client with only openid scope
         client_data = OIDCClient(
@@ -587,7 +587,7 @@ class TestOIDCUserInfo:
             is_confidential=False,
             require_pkce=False,
         )
-        from app.extensions import db
+        from gatehouse_app.extensions import db
         db.session.add(client_data)
         db.session.commit()
         
@@ -620,8 +620,8 @@ class TestOIDCTokenRefresh:
     @pytest.fixture
     def test_client_with_refresh_token(self, client, test_organization, test_user):
         """Create a test OIDC client with refresh token."""
-        from app.models import OIDCClient
-        from app.services.oidc_service import OIDCService
+        from gatehouse_app.models import OIDCClient
+        from gatehouse_app.services.oidc_service import OIDCService
         
         client_data = OIDCClient(
             organization_id=test_organization.id,
@@ -637,7 +637,7 @@ class TestOIDCTokenRefresh:
             is_confidential=False,
             require_pkce=False,
         )
-        from app.extensions import db
+        from gatehouse_app.extensions import db
         db.session.add(client_data)
         db.session.commit()
         
@@ -717,8 +717,8 @@ class TestOIDCTokenRevocation:
     @pytest.fixture
     def test_client_with_tokens(self, client, test_organization, test_user):
         """Create a test OIDC client with valid tokens."""
-        from app.models import OIDCClient
-        from app.services.oidc_service import OIDCService
+        from gatehouse_app.models import OIDCClient
+        from gatehouse_app.services.oidc_service import OIDCService
         
         client_data = OIDCClient(
             organization_id=test_organization.id,
@@ -734,7 +734,7 @@ class TestOIDCTokenRevocation:
             is_confidential=False,
             require_pkce=False,
         )
-        from app.extensions import db
+        from gatehouse_app.extensions import db
         db.session.add(client_data)
         db.session.commit()
         
@@ -821,8 +821,8 @@ class TestOIDCTokenIntrospection:
     @pytest.fixture
     def test_client_with_tokens(self, client, test_organization, test_user):
         """Create a test OIDC client with valid tokens."""
-        from app.models import OIDCClient
-        from app.services.oidc_service import OIDCService
+        from gatehouse_app.models import OIDCClient
+        from gatehouse_app.services.oidc_service import OIDCService
         
         client_data = OIDCClient(
             organization_id=test_organization.id,
@@ -838,7 +838,7 @@ class TestOIDCTokenIntrospection:
             is_confidential=False,
             require_pkce=False,
         )
-        from app.extensions import db
+        from gatehouse_app.extensions import db
         db.session.add(client_data)
         db.session.commit()
         
@@ -896,9 +896,9 @@ class TestOIDCCompleteFlow:
 
     def test_complete_oidc_flow(self, client, app, test_organization, test_user):
         """Test complete OIDC authorization code flow with PKCE."""
-        from app.models import OIDCClient
-        from app.services.oidc_service import OIDCService
-        from app.extensions import db
+        from gatehouse_app.models import OIDCClient
+        from gatehouse_app.services.oidc_service import OIDCService
+        from gatehouse_app.extensions import db
         
         # Create a test client
         with app.app_context():

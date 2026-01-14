@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 # Import the Flask app and db
-from app import create_app
-from app.extensions import db
+from gatehouse_app import create_app
+from gatehouse_app.extensions import db
 
 # Get the app
 app = create_app(os.getenv("FLASK_ENV", "development"))

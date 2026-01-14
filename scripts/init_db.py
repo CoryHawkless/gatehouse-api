@@ -1,6 +1,6 @@
 """Initialize database script."""
-from app import create_app
-from app.extensions import db
+from gatehouse_app import create_app
+from gatehouse_app.extensions import db
 from dotenv import load_dotenv
 
 # Load environment variables

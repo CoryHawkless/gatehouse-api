@@ -1,9 +1,9 @@
 """Unit tests for AuthService."""
 import pytest
-from app.services.auth_service import AuthService
-from app.exceptions.auth_exceptions import InvalidCredentialsError
-from app.exceptions.validation_exceptions import EmailAlreadyExistsError
-from app.utils.constants import UserStatus, AuthMethodType
+from gatehouse_app.services.auth_service import AuthService
+from gatehouse_app.exceptions.auth_exceptions import InvalidCredentialsError
+from gatehouse_app.exceptions.validation_exceptions import EmailAlreadyExistsError
+from gatehouse_app.utils.constants import UserStatus, AuthMethodType
 
 
 @pytest.mark.unit
