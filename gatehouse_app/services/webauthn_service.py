@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from flask import current_app
+from sqlalchemy.orm.attributes import flag_modified
 
 from gatehouse_app.extensions import db, redis_client
 from gatehouse_app.models.user import User
@@ -557,6 +558,9 @@ class WebAuthnService:
             auth_method.provider_data["last_used_at"] = datetime.now(timezone.utc).isoformat()
             auth_method.last_used_at = datetime.now(timezone.utc)
             
+            # Flag provider_data as modified so SQLAlchemy detects the JSON change
+            flag_modified(auth_method, "provider_data")
+            
             db.session.commit()
             
             # Log audit event
@@ -665,6 +669,10 @@ class WebAuthnService:
         
         # Update name
         auth_method.provider_data["name"] = name
+        
+        # Flag provider_data as modified so SQLAlchemy detects the JSON change
+        flag_modified(auth_method, "provider_data")
+        
         db.session.commit()
         
         # Log audit event
