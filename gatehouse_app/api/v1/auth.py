@@ -109,13 +109,29 @@ def login():
             password=data["password"],
         )
 
-        # SECURITY CHECK: Log MFA enrollment status to validate the vulnerability
+        # Check MFA enrollment status
         has_totp = user.has_totp_enabled()
         has_webauthn = user.has_webauthn_enabled()
-        logger.warning(f"[SECURITY DIAGNOSTIC] Login attempt for user {user.email} - TOTP enabled: {has_totp}, WebAuthn enabled: {has_webauthn}")
+        logger.info(f"Login attempt for user {user.email} - TOTP enabled: {has_totp}, WebAuthn enabled: {has_webauthn}")
+
+        # MFA Enforcement: Check WebAuthn first (most secure), then TOTP fallback
+        # Priority: WebAuthn > TOTP > No MFA
+        if has_webauthn:
+            # User has WebAuthn enrolled - require WebAuthn verification
+            # Store user_id in session for WebAuthn verification
+            # The /auth/webauthn/login/complete endpoint will retrieve this user_id
+            session["webauthn_pending_user_id"] = user.id
+
+            # Return response indicating WebAuthn verification is required
+            return api_response(
+                data={
+                    "requires_webauthn": True,
+                },
+                message="Passkey verification required. Please use your passkey to complete login.",
+            )
 
         # Check if user has TOTP enabled for two-factor authentication
-        if user.has_totp_enabled():
+        if has_totp:
             # TOTP is enabled - store user_id in session for TOTP verification
             # The /auth/totp/verify endpoint will retrieve this user_id
             session["totp_pending_user_id"] = user.id
@@ -128,11 +144,6 @@ def login():
                 },
                 message="TOTP code required. Please enter your 6-digit code from your authenticator app.",
             )
-
-        # TOTP is NOT enabled - proceed with normal login flow
-        # SECURITY DIAGNOSTIC: This is where the vulnerability occurs - no WebAuthn check!
-        if has_webauthn:
-            logger.error(f"[SECURITY VULNERABILITY DETECTED] User {user.email} has WebAuthn enrolled but is bypassing it! Creating session without MFA verification.")
         
         # Evaluate MFA policy after primary authentication
         remember_me = data.get("remember_me", False)
@@ -401,7 +412,9 @@ def verify_totp():
         data = schema.load(request.json)
 
         # Get user from temporary session (stored in Flask session by login endpoint)
-        user_id = session.get("totp_pending_user_id")
+        # Check totp_pending_user_id first, then fall back to webauthn_pending_user_id
+        # This allows TOTP to be used as a fallback when WebAuthn was the primary MFA method
+        user_id = session.get("totp_pending_user_id") or session.get("webauthn_pending_user_id")
         if not user_id:
             return api_response(
                 success=False,
@@ -438,8 +451,9 @@ def verify_totp():
         # Create session
         user_session = AuthService.create_session(user, is_compliance_only=is_compliance_only)
 
-        # Clear temporary session
+        # Clear temporary session - clear both pending user IDs
         session.pop("totp_pending_user_id", None)
+        session.pop("webauthn_pending_user_id", None)
 
         # Build response data
         response_data = {
