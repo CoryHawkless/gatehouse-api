@@ -67,6 +67,11 @@ class TOTPVerifyEnrollmentSchema(Schema):
             error="Code must be a 6-digit number",
         ),
     )
+    client_timestamp = fields.Int(
+        required=False,
+        allow_none=True,
+        metadata={"description": "Client UTC timestamp in seconds since epoch for TOTP verification"},
+    )
 
 
 class TOTPVerifySchema(Schema):
@@ -74,6 +79,11 @@ class TOTPVerifySchema(Schema):
 
     code = fields.Str(required=True)
     is_backup_code = fields.Bool(missing=False)
+    client_timestamp = fields.Int(
+        required=False,
+        allow_none=True,
+        metadata={"description": "Client UTC timestamp in seconds since epoch for TOTP verification"},
+    )
 
 
 class TOTPDisableSchema(Schema):

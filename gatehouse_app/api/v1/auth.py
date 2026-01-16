@@ -289,6 +289,7 @@ def verify_totp_enrollment():
 
     Request body:
         code: 6-digit TOTP code from authenticator app
+        client_timestamp: Optional client UTC timestamp in seconds since epoch
 
     Returns:
         200: TOTP enrollment completed successfully
@@ -302,7 +303,11 @@ def verify_totp_enrollment():
         data = schema.load(request.json)
 
         # Verify TOTP enrollment
-        AuthService.verify_totp_enrollment(g.current_user, data["code"])
+        AuthService.verify_totp_enrollment(
+            g.current_user,
+            data["code"],
+            client_utc_timestamp=data.get("client_timestamp"),
+        )
 
         return api_response(
             message="TOTP enrollment completed successfully",
@@ -334,6 +339,7 @@ def verify_totp():
     Request body:
         code: 6-digit TOTP code or backup code
         is_backup_code: True if code is a backup code, False if TOTP code (default: False)
+        client_timestamp: Optional client UTC timestamp in seconds since epoch
 
     Returns:
         200: TOTP code verified successfully with session token
@@ -368,7 +374,10 @@ def verify_totp():
 
         # Verify TOTP code
         AuthService.authenticate_with_totp(
-            user, data["code"], data.get("is_backup_code", False)
+            user,
+            data["code"],
+            data.get("is_backup_code", False),
+            client_utc_timestamp=data.get("client_timestamp"),
         )
 
         # Create full session
@@ -581,19 +590,54 @@ def complete_webauthn_registration():
         401: Not authenticated
         409: Credential already exists
     """
+    import base64
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    user_email = g.current_user.email
+    logger.info(f"WebAuthn registration completion started for user: {user_email}")
+    
     try:
         # Validate request data
         schema = WebAuthnRegistrationCompleteSchema()
         data = schema.load(request.json)
         
         # Extract challenge from client data
-        client_data = data.get("response", {}).get("clientDataJSON", "")
-        import base64
-        client_data_json = base64.urlsafe_b64decode(client_data + "==")
-        client_data_dict = json.loads(client_data_json)
+        client_data_json_b64 = data.get("response", {}).get("clientDataJSON", "")
+        
+        if not client_data_json_b64:
+            logger.error(f"WebAuthn registration failed - missing clientDataJSON for user: {user_email}")
+            return api_response(
+                success=False,
+                message="Missing clientDataJSON in response",
+                status=400,
+                error_type="VALIDATION_ERROR",
+            )
+        
+        try:
+            # Add padding if needed
+            padding = 4 - (len(client_data_json_b64) % 4)
+            if padding != 4:
+                client_data_json_b64_padded = client_data_json_b64 + '=' * padding
+            else:
+                client_data_json_b64_padded = client_data_json_b64
+            
+            client_data_json = base64.urlsafe_b64decode(client_data_json_b64_padded)
+            client_data_dict = json.loads(client_data_json)
+            
+        except Exception as e:
+            logger.error(f"WebAuthn registration failed - client data decode error for user {user_email}: {e}")
+            return api_response(
+                success=False,
+                message=f"Failed to decode client data JSON: {str(e)}",
+                status=400,
+                error_type="VALIDATION_ERROR",
+            )
+        
         challenge = client_data_dict.get("challenge")
         
         if not challenge:
+            logger.error(f"WebAuthn registration failed - no challenge in client data for user: {user_email}")
             return api_response(
                 success=False,
                 message="Invalid challenge in client data",
@@ -608,6 +652,8 @@ def complete_webauthn_registration():
             challenge
         )
         
+        logger.info(f"WebAuthn registration completed successfully for user: {user_email}")
+        
         return api_response(
             data={
                 "credential": auth_method.to_webauthn_dict(),
@@ -617,6 +663,7 @@ def complete_webauthn_registration():
         )
         
     except ValidationError as e:
+        logger.error(f"WebAuthn registration validation error for user {user_email}: {e.messages}")
         return api_response(
             success=False,
             message="Validation failed",
@@ -626,11 +673,21 @@ def complete_webauthn_registration():
         )
         
     except InvalidCredentialsError as e:
+        logger.warning(f"WebAuthn registration failed for user {user_email}: {e.message}")
         return api_response(
             success=False,
             message=e.message,
             status=e.status_code,
             error_type=e.error_type,
+        )
+        
+    except Exception as e:
+        logger.exception(f"WebAuthn registration unexpected error for user {user_email}: {e}")
+        return api_response(
+            success=False,
+            message="An unexpected error occurred during registration",
+            status=500,
+            error_type="INTERNAL_ERROR",
         )
 
 
@@ -647,6 +704,9 @@ def begin_webauthn_login():
         400: Validation error
         404: User not found
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         # Validate request data
         schema = WebAuthnLoginBeginSchema()
@@ -660,6 +720,7 @@ def begin_webauthn_login():
         ).first()
         
         if not user:
+            logger.warning(f"WebAuthn login begin - user not found: {data['email']}")
             return api_response(
                 success=False,
                 message="User not found",
@@ -669,6 +730,7 @@ def begin_webauthn_login():
         
         # Check if user has any WebAuthn credentials
         if not user.has_webauthn_enabled():
+            logger.warning(f"WebAuthn login begin - no credentials for user: {user.email}")
             return api_response(
                 success=False,
                 message="No passkeys found for this account",
@@ -676,16 +738,19 @@ def begin_webauthn_login():
                 error_type="NOT_FOUND",
             )
         
+        logger.info(f"WebAuthn login challenge generated for user: {user.email}")
+        
         # Generate authentication challenge
         options = WebAuthnService.generate_authentication_challenge(user)
         
-        # Store user_id in session for verification
+        # Store user_id in Flask session for WebAuthn verification
         session["webauthn_pending_user_id"] = user.id
         
         # Return unwrapped JSON for WebAuthn
         return jsonify(options), 200
         
     except ValidationError as e:
+        logger.error(f"WebAuthn login begin validation error: {e.messages}")
         return api_response(
             success=False,
             message="Validation failed",
@@ -693,6 +758,9 @@ def begin_webauthn_login():
             error_type="VALIDATION_ERROR",
             error_details=e.messages,
         )
+    except Exception as e:
+        logger.exception(f"WebAuthn login begin unexpected error: {e}")
+        raise
 
 
 @api_v1_bp.route("/auth/webauthn/login/complete", methods=["POST"])
@@ -711,10 +779,15 @@ def complete_webauthn_login():
         400: Validation error
         401: Authentication failed
     """
+    import logging
+    import base64
+    logger = logging.getLogger(__name__)
+    
     try:
-        # Get user from session
+        # Get user from Flask session (stored by /begin endpoint)
         user_id = session.get("webauthn_pending_user_id")
         if not user_id:
+            logger.error("WebAuthn login complete - no pending verification in session")
             return api_response(
                 success=False,
                 message="No pending WebAuthn verification. Please initiate login first.",
@@ -730,6 +803,7 @@ def complete_webauthn_login():
         from gatehouse_app.models.user import User
         user = User.query.get(user_id)
         if not user:
+            logger.error(f"WebAuthn login complete - user not found: {user_id}")
             return api_response(
                 success=False,
                 message="User not found",
@@ -739,12 +813,14 @@ def complete_webauthn_login():
         
         # Extract challenge from client data
         client_data = data.get("response", {}).get("clientDataJSON", "")
-        import base64
+        
         client_data_json = base64.urlsafe_b64decode(client_data + "==")
         client_data_dict = json.loads(client_data_json)
+        
         challenge = client_data_dict.get("challenge")
         
         if not challenge:
+            logger.error(f"WebAuthn login complete - no challenge in client data for user: {user.email}")
             return api_response(
                 success=False,
                 message="Invalid challenge in client data",
@@ -765,6 +841,8 @@ def complete_webauthn_login():
         # Clear pending session
         session.pop("webauthn_pending_user_id", None)
         
+        logger.info(f"WebAuthn login completed successfully for user: {user.email}")
+        
         return api_response(
             data={
                 "user": user.to_dict(),
@@ -777,6 +855,7 @@ def complete_webauthn_login():
         )
         
     except ValidationError as e:
+        logger.error(f"WebAuthn login complete validation error: {e.messages}")
         return api_response(
             success=False,
             message="Validation failed",
@@ -786,12 +865,17 @@ def complete_webauthn_login():
         )
         
     except InvalidCredentialsError as e:
+        logger.warning(f"WebAuthn login complete authentication failed: {e.message}")
         return api_response(
             success=False,
             message=e.message,
             status=e.status_code,
             error_type=e.error_type,
         )
+    
+    except Exception as e:
+        logger.exception(f"WebAuthn login complete unexpected error: {e}")
+        raise
 
 
 @api_v1_bp.route("/auth/webauthn/credentials", methods=["GET"])

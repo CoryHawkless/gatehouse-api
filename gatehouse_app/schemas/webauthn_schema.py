@@ -22,6 +22,8 @@ class WebAuthnRegistrationCompleteSchema(Schema):
         fields.Str(validate=validate.OneOf(["usb", "nfc", "ble", "hybrid", "internal", "platform"])),
         load_default=[]
     )
+    # Optional name field for the credential (WebAuthn spec supports this)
+    name = fields.Str(load_default=None)
     
     @validates_schema
     def validate_response(self, data, **kwargs):

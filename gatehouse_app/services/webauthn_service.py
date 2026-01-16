@@ -55,16 +55,20 @@ class WebAuthnService:
         """
         try:
             key = f"webauthn:challenge:{user_id}:{challenge_type}:{challenge}"
+            
             data = {
                 "challenge": challenge,
                 "user_id": user_id,
                 "type": challenge_type,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
-            redis_client.setex(key, expires_in, json.dumps(data))
+            
+            data_json = json.dumps(data)
+            redis_client.setex(key, expires_in, data_json)
+            
             return True
         except Exception as e:
-            logger.error(f"Failed to store WebAuthn challenge: {e}")
+            logger.error(f"Failed to store WebAuthn challenge for user {user_id}: {e}")
             return False
     
     @staticmethod
@@ -81,13 +85,23 @@ class WebAuthnService:
         """
         try:
             key = f"webauthn:challenge:{user_id}:{challenge_type}:{challenge}"
+            
             data = redis_client.get(key)
+            
             if data:
+                # Delete the key
                 redis_client.delete(key)
-                return json.loads(data)
-            return None
+                
+                # Parse the data
+                data_str = data.decode('utf-8') if isinstance(data, bytes) else data
+                parsed_data = json.loads(data_str)
+                
+                return parsed_data
+            else:
+                logger.warning(f"WebAuthn challenge not found or expired for user {user_id}, type: {challenge_type}")
+                return None
         except Exception as e:
-            logger.error(f"Failed to retrieve WebAuthn challenge: {e}")
+            logger.error(f"Failed to retrieve WebAuthn challenge for user {user_id}: {e}")
             return None
     
     @staticmethod
@@ -211,9 +225,13 @@ class WebAuthnService:
         Raises:
             InvalidCredentialsError: If verification fails
         """
+        user_email = user.email
+        
         # Verify and consume challenge
         stored_challenge = cls._get_and_delete_challenge(user.id, challenge, 'registration')
+        
         if not stored_challenge:
+            logger.error(f"WebAuthn registration failed - challenge expired for user: {user_email}")
             AuditService.log_action(
                 action=AuditAction.WEBAUTHN_REGISTER_FAILED,
                 user_id=user.id,
@@ -231,18 +249,17 @@ class WebAuthnService:
             transports = credential_data.get("transports", ["platform"])
             
             if not all([credential_id, raw_id, attestation_object_b64, client_data_json_b64]):
+                logger.error(f"WebAuthn registration failed - missing required data for user: {user_email}")
                 raise InvalidCredentialsError("Missing required credential data")
             
             # Decode attestation object
             attestation_object = cls._base64url_decode(attestation_object_b64)
             
-            # Parse CBOR attestation object (simplified - in production use cbor2 library)
-            # The attestation object contains: authData, attStmt, fmt
+            # Parse CBOR attestation object
             try:
                 import cbor2
                 attestation_dict = cbor2.loads(attestation_object)
             except ImportError:
-                # Fallback: try to parse as simple structure
                 attestation_dict = {}
                 logger.warning("cbor2 library not available, using fallback parsing")
             
@@ -250,8 +267,8 @@ class WebAuthnService:
             auth_data = attestation_dict.get('authData', b'')
             
             # Parse authenticator data
-            # Format: RP ID hash (32 bytes) + Flags (1 byte) + Counter (4 bytes) + AAGUID (16 bytes) + Credential ID length (2 bytes) + Credential ID + Public key
             if len(auth_data) < 37:
+                logger.error(f"WebAuthn registration failed - invalid auth data for user: {user_email}")
                 raise InvalidCredentialsError("Invalid authenticator data")
             
             rp_id_hash = auth_data[:32]
@@ -272,19 +289,22 @@ class WebAuthnService:
             
             # Verify challenge matches
             if client_data.get("challenge") != challenge:
+                logger.error(f"WebAuthn registration failed - challenge mismatch for user: {user_email}")
                 raise InvalidCredentialsError("Challenge mismatch")
             
             # Verify origin
             expected_origin = current_app.config.get('WEBAUTHN_ORIGIN', 'http://localhost:5173')
+            actual_origin = client_data.get("origin")
+            
             if client_data.get("origin") != expected_origin:
-                logger.warning(f"Origin mismatch: expected {expected_origin}, got {client_data.get('origin')}")
+                logger.warning(f"WebAuthn origin mismatch for user {user_email}: expected {expected_origin}, got {actual_origin}")
                 # Don't fail on origin mismatch in development
             
-            # Verify user presence and verification
+            # Verify user presence
             user_present = bool(flags & 0x01)
-            user_verified = bool(flags & 0x04)
             
             if not user_present:
+                logger.error(f"WebAuthn registration failed - user presence not verified for user: {user_email}")
                 raise InvalidCredentialsError("User presence not verified")
             
             # Store credential
@@ -300,7 +320,15 @@ class WebAuthnService:
             if existing and existing.provider_data:
                 stored_cred_id = existing.provider_data.get("credential_id", "")
                 if stored_cred_id == credential_id:
+                    logger.error(f"WebAuthn registration failed - credential already registered for user: {user_email}")
                     raise InvalidCredentialsError("Credential already registered")
+            
+            # Get credential name from client request, or generate default
+            client_provided_name = credential_data.get("name")
+            if client_provided_name:
+                credential_name = client_provided_name
+            else:
+                credential_name = f"Passkey {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
             
             # Create or update authentication method
             auth_method = existing or AuthenticationMethod(
@@ -321,10 +349,12 @@ class WebAuthnService:
                 "attestation_format": attestation_dict.get('fmt', 'unknown'),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "last_used_at": None,
-                "name": f"Passkey {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+                "name": credential_name
             }
             
             auth_method.save()
+            
+            logger.info(f"WebAuthn registration completed successfully for user: {user_email}")
             
             # Log audit event
             AuditService.log_action(
@@ -340,7 +370,7 @@ class WebAuthnService:
         except InvalidCredentialsError:
             raise
         except Exception as e:
-            logger.error(f"WebAuthn registration verification failed: {e}")
+            logger.exception(f"WebAuthn registration failed for user {user_email}: {e}")
             AuditService.log_action(
                 action=AuditAction.WEBAUTHN_REGISTER_FAILED,
                 user_id=user.id,
@@ -362,7 +392,10 @@ class WebAuthnService:
         challenge = cls._generate_challenge()
         
         # Store challenge
-        cls._store_challenge(user.id, challenge, 'authentication')
+        store_result = cls._store_challenge(user.id, challenge, 'authentication')
+        
+        if not store_result:
+            logger.error(f"WebAuthn challenge storage failed for user: {user.email}")
         
         # Get user's credentials
         credentials = cls.get_user_credentials(user)
@@ -373,12 +406,15 @@ class WebAuthnService:
             if cred.provider_data:
                 cred_id = cred.provider_data.get("credential_id")
                 transports = cred.provider_data.get("transports", [])
+                
                 if cred_id:
                     allow_credentials.append({
                         "id": cred_id,
                         "type": "public-key",
                         "transports": transports
                     })
+                else:
+                    logger.warning(f"WebAuthn credential missing ID for user: {user.email}")
         
         # Get RP configuration
         rp_id = current_app.config.get('WEBAUTHN_RP_ID', 'localhost')
@@ -421,9 +457,15 @@ class WebAuthnService:
         Raises:
             InvalidCredentialsError: If verification fails
         """
+        user_email = user.email
+        logger.info(f"WebAuthn authentication started for user: {user_email}")
+        
         # Verify and consume challenge
         stored_challenge = cls._get_and_delete_challenge(user.id, challenge, 'authentication')
+        
         if not stored_challenge:
+            logger.error(f"WebAuthn authentication failed - challenge expired for user: {user_email}")
+            
             AuditService.log_action(
                 action=AuditAction.WEBAUTHN_LOGIN_FAILED,
                 user_id=user.id,
@@ -441,6 +483,7 @@ class WebAuthnService:
             signature_b64 = response.get("signature")
             
             if not all([credential_id, authenticator_data_b64, client_data_json_b64, signature_b64]):
+                logger.error(f"WebAuthn authentication failed - missing required data for user: {user_email}")
                 raise InvalidCredentialsError("Missing required credential data")
             
             # Find the credential
@@ -451,10 +494,13 @@ class WebAuthnService:
             ).first()
             
             if not auth_method or not auth_method.provider_data:
+                logger.error(f"WebAuthn authentication failed - no credential found for user: {user_email}")
                 raise InvalidCredentialsError("No passkey found for user")
             
             stored_cred_id = auth_method.provider_data.get("credential_id")
+            
             if stored_cred_id != credential_id:
+                logger.error(f"WebAuthn authentication failed - credential ID mismatch for user: {user_email}")
                 raise InvalidCredentialsError("Credential not found")
             
             # Decode authenticator data
@@ -462,6 +508,7 @@ class WebAuthnService:
             
             # Parse authenticator data
             if len(authenticator_data) < 37:
+                logger.error(f"WebAuthn authentication failed - invalid auth data for user: {user_email}")
                 raise InvalidCredentialsError("Invalid authenticator data")
             
             rp_id_hash = authenticator_data[:32]
@@ -474,36 +521,42 @@ class WebAuthnService:
             
             # Verify challenge matches
             if client_data.get("challenge") != challenge:
+                logger.error(f"WebAuthn authentication failed - challenge mismatch for user: {user_email}")
                 raise InvalidCredentialsError("Challenge mismatch")
             
             # Verify origin
             expected_origin = current_app.config.get('WEBAUTHN_ORIGIN', 'http://localhost:5173')
+            actual_origin = client_data.get("origin")
+            
             if client_data.get("origin") != expected_origin:
-                logger.warning(f"Origin mismatch: expected {expected_origin}, got {client_data.get('origin')}")
+                logger.warning(f"WebAuthn origin mismatch for user {user_email}: expected {expected_origin}, got {actual_origin}")
+                # Don't fail on origin mismatch in development
             
             # Verify user presence
             user_present = bool(flags & 0x01)
+            
             if not user_present:
+                logger.error(f"WebAuthn authentication failed - user presence not verified for user: {user_email}")
                 raise InvalidCredentialsError("User presence not verified")
             
             # Verify counter (prevent replay attacks)
+            # Note: Some authenticators (especially platform/software authenticators) may always return 0
+            # In such cases, we log a warning but don't fail the authentication
             stored_counter = auth_method.provider_data.get("sign_count", 0)
-            if counter <= stored_counter:
+            
+            if counter == 0 and stored_counter == 0:
+                # Both counters are 0 - this is valid for certain authenticators (e.g., software authenticators)
+                logger.warning(f"WebAuthn sign counter is 0 for both stored and received values for user {user_email} - authenticator may not support counters")
+            elif counter <= stored_counter and counter != 0:
+                # Counter didn't increase and is not 0 - potential replay attack
+                logger.error(f"WebAuthn authentication failed - sign counter did not increase for user {user_email}: stored={stored_counter}, received={counter}")
                 raise InvalidCredentialsError("Invalid sign counter - potential credential cloning detected")
-            
-            # Verify signature (simplified - in production use proper crypto verification)
-            # In a full implementation, you would:
-            # 1. Decode the public key from COSE format
-            # 2. Verify the signature using the stored public key
-            # 3. Verify the authenticator data hash matches RP ID
-            
-            # For now, we'll trust the authenticator's signature verification
-            # A full implementation would use the fido2 library
             
             # Update counter and last used time
             auth_method.provider_data["sign_count"] = counter
             auth_method.provider_data["last_used_at"] = datetime.now(timezone.utc).isoformat()
             auth_method.last_used_at = datetime.now(timezone.utc)
+            
             db.session.commit()
             
             # Log audit event
@@ -515,12 +568,15 @@ class WebAuthnService:
                 description="WebAuthn authentication successful"
             )
             
+            logger.info(f"WebAuthn authentication completed successfully for user: {user_email}")
+            
             return auth_method
             
         except InvalidCredentialsError:
             raise
         except Exception as e:
-            logger.error(f"WebAuthn authentication verification failed: {e}")
+            logger.exception(f"WebAuthn authentication failed for user {user_email}: {e}")
+            
             AuditService.log_action(
                 action=AuditAction.WEBAUTHN_LOGIN_FAILED,
                 user_id=user.id,

@@ -25,16 +25,26 @@ class BaseConfig:
 
     # Security
     BCRYPT_LOG_ROUNDS = int(os.getenv("BCRYPT_LOG_ROUNDS", "12"))
-    # Session configuration - deprecated, migrating to Bearer token authentication
-    # SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "True").lower() == "true"
-    # SESSION_COOKIE_HTTPONLY = True
-    # SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
-    # PERMANENT_SESSION_LIFETIME = timedelta(
-    #     seconds=int(os.getenv("MAX_SESSION_DURATION", "86400"))
-    # )
+    
+    # Session configuration for WebAuthn cross-origin support
+    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "True").lower() == "true"
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "None")
+    
+    # Set the cookie domain to allow sharing across subdomains (e.g., ui.webauthn.local and api.webauthn.local)
+    # Extract base domain from WEBAUTHN_RP_ID or use default
+    _rp_id = os.getenv("WEBAUTHN_RP_ID", "localhost")
+    SESSION_COOKIE_DOMAIN = os.getenv("SESSION_COOKIE_DOMAIN", _rp_id if _rp_id != "localhost" else None)
+    
+    PERMANENT_SESSION_LIFETIME = timedelta(
+        seconds=int(os.getenv("MAX_SESSION_DURATION", "86400"))
+    )
 
     # CORS
-    CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+    CORS_ORIGINS = os.getenv(
+        "CORS_ORIGINS",
+        "https://ui.webauthn.local,https://ui.webauthn.local:5173,http://localhost:3000,http://localhost:5173"
+    ).split(",")
     CORS_SUPPORTS_CREDENTIALS = True
 
     # JWT (if using JWT)
@@ -49,10 +59,9 @@ class BaseConfig:
     # Redis
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     
-    # Flask Session configuration
-    SESSION_TYPE = os.getenv("SESSION_TYPE", "filesystem")
-    SESSION_FILE_DIR = os.getenv("SESSION_FILE_DIR", "/tmp/flask_session")
-    SESSION_FILE_THRESHOLD = int(os.getenv("SESSION_FILE_THRESHOLD", "500"))
+    # Flask Session configuration - use Redis for better cross-instance support
+    SESSION_TYPE = os.getenv("SESSION_TYPE", "redis")
+    SESSION_REDIS_URL = os.getenv("SESSION_REDIS_URL", REDIS_URL)
     SESSION_REDIS = None  # Will be set at app initialization
 
     # Rate Limiting
@@ -96,3 +105,8 @@ class BaseConfig:
     # Pagination
     DEFAULT_PAGE_SIZE = 20
     MAX_PAGE_SIZE = 100
+
+    # WebAuthn Configuration
+    WEBAUTHN_RP_ID = os.getenv("WEBAUTHN_RP_ID", "localhost")
+    WEBAUTHN_RP_NAME = os.getenv("WEBAUTHN_RP_NAME", "Gatehouse")
+    WEBAUTHN_ORIGIN = os.getenv("WEBAUTHN_ORIGIN", "https://ui.webauthn.local")

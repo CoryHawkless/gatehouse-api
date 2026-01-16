@@ -83,17 +83,18 @@ def initialize_extensions(app):
     if app.config.get("RATELIMIT_ENABLED"):
         limiter.init_app(app)
 
-    # Redis for sessions
+    # Redis for sessions and Flask-Session
     try:
         redis_url = app.config.get("REDIS_URL")
         if redis_url:
             import gatehouse_app.extensions
             gatehouse_app.extensions.redis_client = redis.from_url(redis_url)
             app.config["SESSION_REDIS"] = gatehouse_app.extensions.redis_client
+            logging.info(f"Redis connected successfully for sessions")
     except Exception as e:
         logging.warning(f"Redis connection failed: {e}")
 
-    # Flask-Session
+    # Flask-Session - configure with Redis if available, otherwise filesystem
     flask_session.init_app(app)
 
 

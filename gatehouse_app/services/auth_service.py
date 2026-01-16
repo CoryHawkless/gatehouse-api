@@ -2,6 +2,7 @@
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from flask import request, g, current_app
 from gatehouse_app.extensions import db, bcrypt
 from gatehouse_app.models.user import User
@@ -317,13 +318,14 @@ class AuthService:
         }
 
     @staticmethod
-    def verify_totp_enrollment(user: User, code: str) -> bool:
+    def verify_totp_enrollment(user: User, code: str, client_utc_timestamp: Optional[int] = None) -> bool:
         """
         Complete TOTP enrollment by verifying the first TOTP code.
 
         Args:
             user: User instance
             code: 6-digit TOTP code from authenticator app
+            client_utc_timestamp: Optional client UTC timestamp in seconds since epoch
 
         Returns:
             True if verification successful
@@ -342,7 +344,7 @@ class AuthService:
             raise InvalidCredentialsError("TOTP secret not found")
 
         # Verify the code
-        if not TOTPService.verify_code(secret, code):
+        if not TOTPService.verify_code(secret, code, client_utc_timestamp=client_utc_timestamp):
             raise InvalidCredentialsError("Invalid TOTP code")
 
         # Mark TOTP as verified
@@ -409,7 +411,7 @@ class AuthService:
         return True
 
     @staticmethod
-    def authenticate_with_totp(user: User, code: str, is_backup_code: bool = False) -> bool:
+    def authenticate_with_totp(user: User, code: str, is_backup_code: bool = False, client_utc_timestamp: Optional[int] = None) -> bool:
         """
         Verify TOTP code during login.
 
@@ -417,6 +419,7 @@ class AuthService:
             user: User instance
             code: 6-digit TOTP code or backup code
             is_backup_code: True if code is a backup code, False if TOTP code
+            client_utc_timestamp: Optional client UTC timestamp in seconds since epoch
 
         Returns:
             True if code is valid
@@ -477,7 +480,7 @@ class AuthService:
             if not secret:
                 raise InvalidCredentialsError("TOTP secret not found")
 
-            is_valid = TOTPService.verify_code(secret, code)
+            is_valid = TOTPService.verify_code(secret, code, client_utc_timestamp=client_utc_timestamp)
 
             if is_valid:
                 auth_method.last_used_at = datetime.now(timezone.utc)

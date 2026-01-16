@@ -4,7 +4,7 @@ import io
 import logging
 import secrets
 from datetime import datetime, timezone
-from typing import Tuple
+from typing import Optional, Tuple
 
 import pyotp
 from gatehouse_app.extensions import bcrypt
@@ -57,7 +57,7 @@ class TOTPService:
         return uri
 
     @staticmethod
-    def verify_code(secret: str, code: str, window: int = 1) -> bool:
+    def verify_code(secret: str, code: str, window: int = 1, client_utc_timestamp: Optional[int] = None) -> bool:
         """
         Verify a TOTP code against the secret.
 
@@ -65,6 +65,9 @@ class TOTPService:
             secret: TOTP secret (base32 encoded)
             code: 6-digit TOTP code to verify
             window: Time window for code validation (default: 1, allows codes from previous/next time steps)
+            client_utc_timestamp: Optional client UTC timestamp in seconds since epoch.
+                If provided, uses client's timestamp instead of server time to handle
+                timezone mismatches between client and server.
 
         Returns:
             True if code is valid, False otherwise
@@ -82,7 +85,13 @@ class TOTPService:
         # IMPORTANT: We must pass a datetime object, NOT a Unix timestamp
         # pyotp's internal datetime.utcfromtimestamp() is deprecated and can be
         # affected by local timezone settings, causing the 10.5 hour skew issue
-        utc_now = datetime.now(timezone.utc)
+        if client_utc_timestamp:
+            # Use client's UTC timestamp to handle timezone mismatches
+            utc_now = datetime.fromtimestamp(client_utc_timestamp, tz=timezone.utc)
+            logger.debug(f"[TOTP] Using client UTC timestamp: {client_utc_timestamp}")
+        else:
+            # Fallback to server time
+            utc_now = datetime.now(timezone.utc)
         
         # DEBUG: Log detailed timezone information
         logger.debug(f"[TOTP DEBUG] UTC now: {utc_now}")
