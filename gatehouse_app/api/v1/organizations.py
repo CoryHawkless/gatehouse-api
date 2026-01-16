@@ -3,7 +3,7 @@ from flask import g, request
 from marshmallow import ValidationError
 from gatehouse_app.api.v1 import api_v1_bp
 from gatehouse_app.utils.response import api_response
-from gatehouse_app.utils.decorators import login_required, require_admin, require_owner
+from gatehouse_app.utils.decorators import login_required, require_admin, require_owner, full_access_required
 from gatehouse_app.schemas.organization_schema import (
     OrganizationCreateSchema,
     OrganizationUpdateSchema,
@@ -17,6 +17,7 @@ from gatehouse_app.utils.constants import OrganizationRole
 
 @api_v1_bp.route("/organizations", methods=["POST"])
 @login_required
+@full_access_required
 def create_organization():
     """
     Create a new organization.
@@ -65,6 +66,7 @@ def create_organization():
 
 @api_v1_bp.route("/organizations/<org_id>", methods=["GET"])
 @login_required
+@full_access_required
 def get_organization(org_id):
     """
     Get organization by ID.
@@ -101,6 +103,7 @@ def get_organization(org_id):
 @api_v1_bp.route("/organizations/<org_id>", methods=["PATCH"])
 @login_required
 @require_admin
+@full_access_required
 def update_organization(org_id):
     """
     Update organization.
@@ -152,6 +155,7 @@ def update_organization(org_id):
 @api_v1_bp.route("/organizations/<org_id>", methods=["DELETE"])
 @login_required
 @require_owner
+@full_access_required
 def delete_organization(org_id):
     """
     Delete organization (soft delete).
@@ -180,6 +184,7 @@ def delete_organization(org_id):
 
 @api_v1_bp.route("/organizations/<org_id>/members", methods=["GET"])
 @login_required
+@full_access_required
 def get_organization_members(org_id):
     """
     Get all members of an organization.
@@ -223,6 +228,7 @@ def get_organization_members(org_id):
 @api_v1_bp.route("/organizations/<org_id>/members", methods=["POST"])
 @login_required
 @require_admin
+@full_access_required
 def add_organization_member(org_id):
     """
     Add a member to the organization.
@@ -290,6 +296,7 @@ def add_organization_member(org_id):
 @api_v1_bp.route("/organizations/<org_id>/members/<user_id>", methods=["DELETE"])
 @login_required
 @require_admin
+@full_access_required
 def remove_organization_member(org_id, user_id):
     """
     Remove a member from the organization.
@@ -320,6 +327,7 @@ def remove_organization_member(org_id, user_id):
 @api_v1_bp.route("/organizations/<org_id>/members/<user_id>/role", methods=["PATCH"])
 @login_required
 @require_admin
+@full_access_required
 def update_member_role(org_id, user_id):
     """
     Update a member's role.

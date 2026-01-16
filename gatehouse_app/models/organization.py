@@ -24,6 +24,13 @@ class Organization(BaseModel):
     oidc_clients = db.relationship(
         "OIDCClient", back_populates="organization", cascade="all, delete-orphan"
     )
+    security_policy = db.relationship(
+        "OrganizationSecurityPolicy",
+        back_populates="organization",
+        uselist=False,
+        cascade="all, delete-orphan",
+        foreign_keys="OrganizationSecurityPolicy.organization_id",
+    )
 
     def __repr__(self):
         """String representation of Organization."""

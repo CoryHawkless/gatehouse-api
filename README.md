@@ -286,7 +286,6 @@ For issues and questions:
 
 # Boostrap db
 python manage.py db upgrade
-python manage.py db migrate
 
 
 

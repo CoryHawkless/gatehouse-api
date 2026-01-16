@@ -31,6 +31,18 @@ class User(BaseModel):
         foreign_keys="OrganizationMember.user_id",
     )
     audit_logs = db.relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
+    security_policies = db.relationship(
+        "UserSecurityPolicy",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="UserSecurityPolicy.user_id",
+    )
+    mfa_compliance = db.relationship(
+        "MfaPolicyCompliance",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="MfaPolicyCompliance.user_id",
+    )
 
     def __repr__(self):
         """String representation of User."""

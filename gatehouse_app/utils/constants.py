@@ -9,6 +9,7 @@ class UserStatus(str, Enum):
     INACTIVE = "inactive"
     SUSPENDED = "suspended"
     PENDING = "pending"
+    COMPLIANCE_SUSPENDED = "compliance_suspended"
 
 
 class OrganizationRole(str, Enum):
@@ -86,6 +87,12 @@ class AuditAction(str, Enum):
     WEBAUTHN_CREDENTIAL_DELETED = "webauthn.credential.deleted"
     WEBAUTHN_CREDENTIAL_RENAMED = "webauthn.credential.renamed"
 
+    # Security policy actions
+    ORG_SECURITY_POLICY_UPDATE = "org.security_policy.update"
+    USER_SECURITY_POLICY_OVERRIDE_UPDATE = "user.security_policy.override_update"
+    MFA_POLICY_USER_SUSPENDED = "mfa.policy.user_suspended"
+    MFA_POLICY_USER_COMPLIANT = "mfa.policy.user_compliant"
+
 
 class OIDCGrantType(str, Enum):
     """OIDC grant types."""
@@ -116,3 +123,32 @@ class ErrorType:
     RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     BAD_REQUEST = "BAD_REQUEST"
+
+
+class MfaPolicyMode(str, Enum):
+    """MFA policy mode for organizations."""
+
+    DISABLED = "disabled"
+    OPTIONAL = "optional"
+    REQUIRE_TOTP = "require_totp"
+    REQUIRE_WEBAUTHN = "require_webauthn"
+    REQUIRE_TOTP_OR_WEBAUTHN = "require_totp_or_webauthn"
+
+
+class MfaComplianceStatus(str, Enum):
+    """MFA compliance status for users per organization."""
+
+    NOT_APPLICABLE = "not_applicable"
+    PENDING = "pending"
+    IN_GRACE = "in_grace"
+    COMPLIANT = "compliant"
+    PAST_DUE = "past_due"
+    SUSPENDED = "suspended"
+
+
+class MfaRequirementOverride(str, Enum):
+    """User override for organization MFA requirements."""
+
+    INHERIT = "inherit"
+    REQUIRED = "required"
+    EXEMPT = "exempt"

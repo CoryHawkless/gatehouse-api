@@ -25,6 +25,9 @@ class Session(BaseModel):
     revoked_at = db.Column(db.DateTime, nullable=True)
     revoked_reason = db.Column(db.String(255), nullable=True)
 
+    # Compliance session flag
+    is_compliance_only = db.Column(db.Boolean, nullable=False, default=False)
+
     # Relationships
     user = db.relationship("User", back_populates="sessions")
 

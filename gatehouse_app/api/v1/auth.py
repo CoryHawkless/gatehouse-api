@@ -22,6 +22,7 @@ from gatehouse_app.schemas.webauthn_schema import (
 from gatehouse_app.services.auth_service import AuthService
 from gatehouse_app.services.webauthn_service import WebAuthnService
 from gatehouse_app.services.user_service import UserService
+from gatehouse_app.services.mfa_policy_service import MfaPolicyService
 from gatehouse_app.utils.decorators import login_required
 from gatehouse_app.utils.constants import AuditAction
 from gatehouse_app.exceptions.auth_exceptions import InvalidCredentialsError
@@ -94,6 +95,9 @@ def login():
         400: Validation error
         401: Invalid credentials
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
         # Validate request data
         schema = LoginSchema()
@@ -104,6 +108,11 @@ def login():
             email=data["email"],
             password=data["password"],
         )
+
+        # SECURITY CHECK: Log MFA enrollment status to validate the vulnerability
+        has_totp = user.has_totp_enabled()
+        has_webauthn = user.has_webauthn_enabled()
+        logger.warning(f"[SECURITY DIAGNOSTIC] Login attempt for user {user.email} - TOTP enabled: {has_totp}, WebAuthn enabled: {has_webauthn}")
 
         # Check if user has TOTP enabled for two-factor authentication
         if user.has_totp_enabled():
@@ -121,16 +130,56 @@ def login():
             )
 
         # TOTP is NOT enabled - proceed with normal login flow
+        # SECURITY DIAGNOSTIC: This is where the vulnerability occurs - no WebAuthn check!
+        if has_webauthn:
+            logger.error(f"[SECURITY VULNERABILITY DETECTED] User {user.email} has WebAuthn enrolled but is bypassing it! Creating session without MFA verification.")
+        
+        # Evaluate MFA policy after primary authentication
+        remember_me = data.get("remember_me", False)
+        policy_result = MfaPolicyService.after_primary_auth_success(user, remember_me)
+
         # Create session with appropriate duration based on remember_me preference
-        duration = 2592000 if data.get("remember_me") else 86400  # 30 days vs 1 day
-        user_session = AuthService.create_session(user, duration_seconds=duration)
+        duration = 2592000 if remember_me else 86400  # 30 days vs 1 day
+
+        # Determine if this should be a compliance-only session
+        is_compliance_only = policy_result.create_compliance_only_session
+
+        user_session = AuthService.create_session(
+            user,
+            duration_seconds=duration,
+            is_compliance_only=is_compliance_only
+        )
+
+        # Build response data
+        response_data = {
+            "user": user.to_dict(),
+            "token": user_session.token,
+            "expires_at": user_session.expires_at.isoformat() + "Z" if user_session.expires_at.isoformat()[-1] != "Z" else user_session.expires_at.isoformat(),
+        }
+
+        # Add MFA compliance information
+        if policy_result.compliance_summary:
+            response_data["mfa_compliance"] = {
+                "overall_status": policy_result.compliance_summary.overall_status,
+                "missing_methods": policy_result.compliance_summary.missing_methods,
+                "deadline_at": policy_result.compliance_summary.deadline_at,
+                "orgs": [
+                    {
+                        "organization_id": org.organization_id,
+                        "organization_name": org.organization_name,
+                        "status": org.status,
+                        "deadline_at": org.deadline_at,
+                    }
+                    for org in policy_result.compliance_summary.orgs
+                ],
+            }
+
+        # Add requires_mfa_enrollment flag if compliance-only session
+        if is_compliance_only:
+            response_data["requires_mfa_enrollment"] = True
 
         return api_response(
-            data={
-                "user": user.to_dict(),
-                "token": user_session.token,
-                "expires_at": user_session.expires_at.isoformat() + "Z" if user_session.expires_at.isoformat()[-1] != "Z" else user_session.expires_at.isoformat(),
-            },
+            data=response_data,
             message="Login successful",
         )
 
@@ -380,20 +429,50 @@ def verify_totp():
             client_utc_timestamp=data.get("client_timestamp"),
         )
 
-        # Create full session
-        user_session = AuthService.create_session(user)
+        # Evaluate MFA policy after primary authentication
+        policy_result = MfaPolicyService.after_primary_auth_success(user, remember_me=False)
+
+        # Determine if this should be a compliance-only session
+        is_compliance_only = policy_result.create_compliance_only_session
+
+        # Create session
+        user_session = AuthService.create_session(user, is_compliance_only=is_compliance_only)
 
         # Clear temporary session
         session.pop("totp_pending_user_id", None)
 
+        # Build response data
+        response_data = {
+            "user": user.to_dict(),
+            "token": user_session.token,
+            "expires_at": user_session.expires_at.isoformat() + "Z"
+            if user_session.expires_at.isoformat()[-1] != "Z"
+            else user_session.expires_at.isoformat(),
+        }
+
+        # Add MFA compliance information
+        if policy_result.compliance_summary:
+            response_data["mfa_compliance"] = {
+                "overall_status": policy_result.compliance_summary.overall_status,
+                "missing_methods": policy_result.compliance_summary.missing_methods,
+                "deadline_at": policy_result.compliance_summary.deadline_at,
+                "orgs": [
+                    {
+                        "organization_id": org.organization_id,
+                        "organization_name": org.organization_name,
+                        "status": org.status,
+                        "deadline_at": org.deadline_at,
+                    }
+                    for org in policy_result.compliance_summary.orgs
+                ],
+            }
+
+        # Add requires_mfa_enrollment flag if compliance-only session
+        if is_compliance_only:
+            response_data["requires_mfa_enrollment"] = True
+
         return api_response(
-            data={
-                "user": user.to_dict(),
-                "token": user_session.token,
-                "expires_at": user_session.expires_at.isoformat() + "Z"
-                if user_session.expires_at.isoformat()[-1] != "Z"
-                else user_session.expires_at.isoformat(),
-            },
+            data=response_data,
             message="TOTP verification successful",
         )
 
@@ -835,22 +914,52 @@ def complete_webauthn_login():
             challenge
         )
         
+        # Evaluate MFA policy after primary authentication
+        policy_result = MfaPolicyService.after_primary_auth_success(user, remember_me=False)
+        
+        # Determine if this should be a compliance-only session
+        is_compliance_only = policy_result.create_compliance_only_session
+        
         # Create session
-        user_session = AuthService.create_session(user)
+        user_session = AuthService.create_session(user, is_compliance_only=is_compliance_only)
         
         # Clear pending session
         session.pop("webauthn_pending_user_id", None)
         
         logger.info(f"WebAuthn login completed successfully for user: {user.email}")
         
+        # Build response data
+        response_data = {
+            "user": user.to_dict(),
+            "token": user_session.token,
+            "expires_at": user_session.expires_at.isoformat() + "Z"
+            if user_session.expires_at.isoformat()[-1] != "Z"
+            else user_session.expires_at.isoformat(),
+        }
+        
+        # Add MFA compliance information
+        if policy_result.compliance_summary:
+            response_data["mfa_compliance"] = {
+                "overall_status": policy_result.compliance_summary.overall_status,
+                "missing_methods": policy_result.compliance_summary.missing_methods,
+                "deadline_at": policy_result.compliance_summary.deadline_at,
+                "orgs": [
+                    {
+                        "organization_id": org.organization_id,
+                        "organization_name": org.organization_name,
+                        "status": org.status,
+                        "deadline_at": org.deadline_at,
+                    }
+                    for org in policy_result.compliance_summary.orgs
+                ],
+            }
+        
+        # Add requires_mfa_enrollment flag if compliance-only session
+        if is_compliance_only:
+            response_data["requires_mfa_enrollment"] = True
+        
         return api_response(
-            data={
-                "user": user.to_dict(),
-                "token": user_session.token,
-                "expires_at": user_session.expires_at.isoformat() + "Z"
-                if user_session.expires_at.isoformat()[-1] != "Z"
-                else user_session.expires_at.isoformat(),
-            },
+            data=response_data,
             message="Login successful",
         )
         

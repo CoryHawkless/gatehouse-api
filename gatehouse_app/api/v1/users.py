@@ -3,7 +3,7 @@ from flask import g, request
 from marshmallow import ValidationError
 from gatehouse_app.api.v1 import api_v1_bp
 from gatehouse_app.utils.response import api_response
-from gatehouse_app.utils.decorators import login_required
+from gatehouse_app.utils.decorators import login_required, full_access_required
 from gatehouse_app.schemas.user_schema import UserUpdateSchema, ChangePasswordSchema
 from gatehouse_app.services.user_service import UserService
 from gatehouse_app.services.auth_service import AuthService
@@ -29,6 +29,7 @@ def get_me():
 
 @api_v1_bp.route("/users/me", methods=["PATCH"])
 @login_required
+@full_access_required
 def update_me():
     """
     Update current user profile.
@@ -67,6 +68,7 @@ def update_me():
 
 @api_v1_bp.route("/users/me", methods=["DELETE"])
 @login_required
+@full_access_required
 def delete_me():
     """
     Delete current user account (soft delete).
@@ -84,6 +86,7 @@ def delete_me():
 
 @api_v1_bp.route("/users/me/password", methods=["POST"])
 @login_required
+@full_access_required
 def change_password():
     """
     Change current user password.
@@ -136,6 +139,7 @@ def change_password():
 
 @api_v1_bp.route("/users/me/organizations", methods=["GET"])
 @login_required
+@full_access_required
 def get_my_organizations():
     """
     Get all organizations current user is a member of.

@@ -2,7 +2,8 @@
 from functools import wraps
 from flask import request, g
 from gatehouse_app.utils.response import api_response
-from gatehouse_app.utils.constants import OrganizationRole
+from gatehouse_app.utils.constants import OrganizationRole, UserStatus
+from gatehouse_app.exceptions.auth_exceptions import UnauthorizedError, ForbiddenError
 
 
 def login_required(f):
@@ -127,3 +128,41 @@ def require_owner(f):
 def require_admin(f):
     """Decorator to require organization admin or owner role."""
     return require_role(OrganizationRole.OWNER, OrganizationRole.ADMIN)(f)
+
+
+def full_access_required(f):
+    """Decorator to require full access session (not compliance-only).
+    
+    This decorator checks if the user has a compliance-only session or
+    is in COMPLIANCE_SUSPENDED status. If so, it returns a 403 error
+    with error_type "MFA_COMPLIANCE_REQUIRED".
+    
+    Use this decorator on endpoints that require full MFA compliance.
+    Endpoints for MFA enrollment, status, and logout should NOT use this decorator.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user = getattr(g, "current_user", None)
+        session = getattr(g, "current_session", None)
+
+        if not user or not session:
+            return api_response(
+                success=False,
+                message="Authentication required",
+                status=401,
+                error_type="AUTH_REQUIRED",
+            )
+
+        # Check for compliance-only session or compliance suspended status
+        if session.is_compliance_only or user.status == UserStatus.COMPLIANCE_SUSPENDED:
+            return api_response(
+                success=False,
+                message="MFA compliance required to access this resource",
+                status=403,
+                error_type="MFA_COMPLIANCE_REQUIRED",
+                error_details={"overall_status": "suspended"},
+            )
+
+        return f(*args, **kwargs)
+
+    return decorated_function

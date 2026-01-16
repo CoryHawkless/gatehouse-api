@@ -96,3 +96,29 @@ class TOTPRegenerateBackupCodesSchema(Schema):
     """Schema for regenerating backup codes."""
 
     password = fields.Str(required=True, validate=validate.Length(min=1))
+
+
+class MfaComplianceOrgSchema(Schema):
+    """Schema for MFA compliance per organization."""
+    organization_id = fields.Str(required=True)
+    organization_name = fields.Str(required=True)
+    status = fields.Str(required=True)
+    deadline_at = fields.Str(allow_none=True)
+
+
+class MfaComplianceSchema(Schema):
+    """Schema for MFA compliance summary in login response."""
+    overall_status = fields.Str(required=True)
+    missing_methods = fields.List(fields.Str(), required=True)
+    deadline_at = fields.Str(allow_none=True)
+    orgs = fields.List(fields.Nested(MfaComplianceOrgSchema), required=True)
+
+
+class LoginResponseSchema(Schema):
+    """Schema for login response."""
+    user = fields.Dict(required=True)
+    token = fields.Str(required=True)
+    expires_at = fields.Str(required=True)
+    requires_totp = fields.Bool(required=False)
+    requires_mfa_enrollment = fields.Bool(required=False)
+    mfa_compliance = fields.Nested(MfaComplianceSchema, required=False)

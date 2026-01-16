@@ -140,13 +140,14 @@ class AuthService:
         return user
 
     @staticmethod
-    def create_session(user, duration_seconds=86400):
+    def create_session(user, duration_seconds=86400, is_compliance_only=False):
         """
         Create a new session for the user.
 
         Args:
             user: User instance
             duration_seconds: Session duration in seconds
+            is_compliance_only: Whether this is a compliance-only session (limited access)
 
         Returns:
             Session instance
@@ -163,6 +164,7 @@ class AuthService:
             user_agent=request.headers.get("User-Agent"),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=duration_seconds),
             last_activity_at=datetime.now(timezone.utc),
+            is_compliance_only=is_compliance_only,
         )
         session.save()
 

@@ -16,6 +16,7 @@ from gatehouse_app.services.oidc_service import (
     OIDCService, InvalidClientError, InvalidGrantError, InvalidRequestError
 )
 from gatehouse_app.services.auth_service import AuthService
+from gatehouse_app.services.mfa_policy_service import MfaPolicyService
 from gatehouse_app.extensions import db
 from gatehouse_app.extensions import bcrypt as flask_bcrypt
 from gatehouse_app.models import User, OIDCClient
@@ -372,6 +373,23 @@ def oidc_authorize():
         logger.debug("[OIDC] Attempting user authentication for email: %s", email)
         try:
             user = AuthService.authenticate(email, password)
+            
+            # Evaluate MFA policy after primary authentication
+            policy_result = MfaPolicyService.after_primary_auth_success(user, remember_me=False)
+            
+            # Check if user can create full session
+            if not policy_result.can_create_full_session:
+                logger.debug("[OIDC] User cannot create full session due to MFA compliance: user_id=%s, email=%s", user.id, email)
+                return _show_login_page(
+                    client_id=client_id,
+                    redirect_uri=redirect_uri,
+                    scope=scope,
+                    state=state,
+                    nonce=nonce,
+                    response_type=response_type,
+                    error="Your account requires multi factor enrollment before using single sign on"
+                )
+            
             user_id = user.id
             session["oidc_user_id"] = user_id
             
