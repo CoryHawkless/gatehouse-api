@@ -24,6 +24,9 @@ class Organization(BaseModel):
     oidc_clients = db.relationship(
         "OIDCClient", back_populates="organization", cascade="all, delete-orphan"
     )
+    external_provider_configs = db.relationship(
+        "ExternalProviderConfig", back_populates="organization", cascade="all, delete-orphan"
+    )
     security_policy = db.relationship(
         "OrganizationSecurityPolicy",
         back_populates="organization",

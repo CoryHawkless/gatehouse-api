@@ -22,6 +22,21 @@ class BaseModel(db.Model):
     )
     deleted_at = db.Column(db.DateTime, nullable=True)
 
+    @classmethod
+    def create(cls, **kwargs):
+        """Create and save a new model instance.
+        
+        Args:
+            **kwargs: Model field values
+            
+        Returns:
+            The created model instance
+        """
+        instance = cls(**kwargs)
+        db.session.add(instance)
+        db.session.commit()
+        return instance
+
     def save(self):
         """Save the model instance to database."""
         db.session.add(self)

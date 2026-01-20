@@ -26,6 +26,9 @@ class BaseConfig:
     # Security
     BCRYPT_LOG_ROUNDS = int(os.getenv("BCRYPT_LOG_ROUNDS", "12"))
     
+    # Encryption key for sensitive data (client secrets, tokens, etc.)
+    ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "dev-encryption-key-change-in-production")
+    
     # Session configuration for WebAuthn cross-origin support
     SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "True").lower() == "true"
     SESSION_COOKIE_HTTPONLY = True

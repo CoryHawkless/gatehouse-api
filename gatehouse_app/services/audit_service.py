@@ -105,3 +105,232 @@ class AuditService:
             .limit(limit)
             .all()
         )
+
+    # External Authentication Provider Audit Methods
+
+    @staticmethod
+    def log_external_auth_link_initiated(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        state_id: str = None,
+    ):
+        """Log external auth account linking initiated event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_LINK_INITIATED,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="oauth_state",
+            resource_id=state_id,
+            metadata={
+                "provider_type": provider_type,
+            },
+            description=f"External auth link initiated for {provider_type}",
+            success=True,
+        )
+
+    @staticmethod
+    def log_external_auth_link_completed(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        provider_user_id: str,
+        auth_method_id: str = None,
+    ):
+        """Log external auth account linking completed event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_LINK_COMPLETED,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="authentication_method",
+            resource_id=auth_method_id,
+            metadata={
+                "provider_type": provider_type,
+                "provider_user_id": provider_user_id,
+            },
+            description=f"External auth account linked: {provider_type} ({provider_user_id})",
+            success=True,
+        )
+
+    @staticmethod
+    def log_external_auth_link_failed(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        error_message: str,
+        failure_reason: str = None,
+    ):
+        """Log external auth account linking failed event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_LINK_FAILED,
+            user_id=user_id,
+            organization_id=organization_id,
+            metadata={
+                "provider_type": provider_type,
+                "failure_reason": failure_reason,
+            },
+            description=f"External auth link failed for {provider_type}: {error_message}",
+            success=False,
+            error_message=error_message,
+        )
+
+    @staticmethod
+    def log_external_auth_unlink(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        provider_user_id: str,
+        auth_method_id: str = None,
+    ):
+        """Log external auth account unlinking event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_UNLINK,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="authentication_method",
+            resource_id=auth_method_id,
+            metadata={
+                "provider_type": provider_type,
+                "provider_user_id": provider_user_id,
+            },
+            description=f"External auth account unlinked: {provider_type} ({provider_user_id})",
+            success=True,
+        )
+
+    @staticmethod
+    def log_external_auth_login(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        provider_user_id: str,
+        auth_method_id: str = None,
+        session_id: str = None,
+        mfa_used: bool = False,
+    ):
+        """Log external auth login event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_LOGIN,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="session",
+            resource_id=session_id,
+            metadata={
+                "provider_type": provider_type,
+                "provider_user_id": provider_user_id,
+                "auth_method_id": auth_method_id,
+                "mfa_used": mfa_used,
+            },
+            description=f"User logged in with {provider_type}",
+            success=True,
+        )
+
+    @staticmethod
+    def log_external_auth_login_failed(
+        organization_id: str,
+        provider_type: str,
+        provider_user_id: str = None,
+        email: str = None,
+        failure_reason: str = None,
+        error_message: str = None,
+    ):
+        """Log external auth login failed event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_LOGIN_FAILED,
+            user_id=None,  # Unknown user
+            organization_id=organization_id,
+            metadata={
+                "provider_type": provider_type,
+                "provider_user_id": provider_user_id,
+                "email": email,
+                "failure_reason": failure_reason,
+            },
+            description=f"Failed login attempt with {provider_type}: {failure_reason or error_message}",
+            success=False,
+            error_message=error_message or failure_reason,
+        )
+
+    @staticmethod
+    def log_external_auth_token_refresh(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        auth_method_id: str = None,
+    ):
+        """Log external auth token refresh event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_TOKEN_REFRESH,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="authentication_method",
+            resource_id=auth_method_id,
+            metadata={
+                "provider_type": provider_type,
+            },
+            description=f"External auth token refreshed for {provider_type}",
+            success=True,
+        )
+
+    @staticmethod
+    def log_external_auth_config_create(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        config_id: str = None,
+    ):
+        """Log external auth provider config creation event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_CONFIG_CREATE,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="external_provider_config",
+            resource_id=config_id,
+            metadata={
+                "provider_type": provider_type,
+            },
+            description=f"External auth provider config created: {provider_type}",
+            success=True,
+        )
+
+    @staticmethod
+    def log_external_auth_config_update(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        config_id: str = None,
+        changes: dict = None,
+    ):
+        """Log external auth provider config update event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_CONFIG_UPDATE,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="external_provider_config",
+            resource_id=config_id,
+            metadata={
+                "provider_type": provider_type,
+                "changes": changes,
+            },
+            description=f"External auth provider config updated: {provider_type}",
+            success=True,
+        )
+
+    @staticmethod
+    def log_external_auth_config_delete(
+        user_id: str,
+        organization_id: str,
+        provider_type: str,
+        config_id: str = None,
+    ):
+        """Log external auth provider config deletion event."""
+        return AuditService.log_action(
+            action=AuditAction.EXTERNAL_AUTH_CONFIG_DELETE,
+            user_id=user_id,
+            organization_id=organization_id,
+            resource_type="external_provider_config",
+            resource_id=config_id,
+            metadata={
+                "provider_type": provider_type,
+            },
+            description=f"External auth provider config deleted: {provider_type}",
+            success=True,
+        )

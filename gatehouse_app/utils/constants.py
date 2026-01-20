@@ -93,6 +93,18 @@ class AuditAction(str, Enum):
     MFA_POLICY_USER_SUSPENDED = "mfa.policy.user_suspended"
     MFA_POLICY_USER_COMPLIANT = "mfa.policy.user_compliant"
 
+    # External authentication provider actions
+    EXTERNAL_AUTH_LINK_INITIATED = "external_auth.link.initiated"
+    EXTERNAL_AUTH_LINK_COMPLETED = "external_auth.link.completed"
+    EXTERNAL_AUTH_LINK_FAILED = "external_auth.link.failed"
+    EXTERNAL_AUTH_UNLINK = "external_auth.unlink"
+    EXTERNAL_AUTH_LOGIN = "external_auth.login"
+    EXTERNAL_AUTH_LOGIN_FAILED = "external_auth.login.failed"
+    EXTERNAL_AUTH_TOKEN_REFRESH = "external_auth.token_refresh"
+    EXTERNAL_AUTH_CONFIG_CREATE = "external_auth.config.create"
+    EXTERNAL_AUTH_CONFIG_UPDATE = "external_auth.config.update"
+    EXTERNAL_AUTH_CONFIG_DELETE = "external_auth.config.delete"
+
 
 class OIDCGrantType(str, Enum):
     """OIDC grant types."""
