@@ -1,4 +1,5 @@
 """External authentication provider endpoints."""
+import logging
 from flask import request, g
 from marshmallow import ValidationError
 from gatehouse_app.api.v1 import api_v1_bp
@@ -14,6 +15,8 @@ from gatehouse_app.services.oauth_flow_service import (
     OAuthFlowError,
 )
 from gatehouse_app.services.audit_service import AuditService
+
+logger = logging.getLogger(__name__)
 
 
 # Provider type mapping
@@ -532,25 +535,35 @@ def unlink_account(provider: str):
 def initiate_oauth_authorize(provider: str):
     """
     Initiate OAuth authentication or account registration flow.
+    
+    This endpoint initiates OAuth flows without requiring organization_id upfront.
+    The organization context is determined after successful authentication based on
+    the user's memberships.
 
     Args:
         provider: Provider type (google, github, microsoft)
 
     Query parameters:
-        flow: 'login' or 'register'
-        redirect_uri: Optional redirect URI
-        organization_id: Optional organization context
+        flow: 'login' or 'register' (default: 'login')
+        redirect_uri: Optional redirect URI after OAuth completion
+        organization_id: Optional organization hint (for SSO discovery)
 
     Returns:
-        302: Redirect to provider authorization page
-        400: Validation error or provider not configured
+        200: Authorization URL and state token
+        400: Validation error or provider not configured at application level
+        
+    Response:
+        {
+            "authorization_url": "https://...",
+            "state": "state_token"
+        }
     """
     provider_type = get_provider_type(provider)
 
-    # Get query parameters
+    # Get query parameters - organization_id is now optional
     flow = request.args.get("flow", "login")
     redirect_uri = request.args.get("redirect_uri")
-    organization_id = request.args.get("organization_id")
+    organization_id = request.args.get("organization_id")  # Optional hint
 
     if flow not in ["login", "register"]:
         return api_response(
@@ -561,16 +574,17 @@ def initiate_oauth_authorize(provider: str):
         )
 
     try:
+        # Initiate flow - organization_id is now optional
         if flow == "login":
             auth_url, state = OAuthFlowService.initiate_login_flow(
                 provider_type=provider_type,
-                organization_id=organization_id,
+                organization_id=organization_id,  # Optional hint
                 redirect_uri=redirect_uri,
             )
         else:
             auth_url, state = OAuthFlowService.initiate_register_flow(
                 provider_type=provider_type,
-                organization_id=organization_id,
+                organization_id=organization_id,  # Optional hint
                 redirect_uri=redirect_uri,
             )
 
@@ -595,20 +609,54 @@ def initiate_oauth_authorize(provider: str):
 def handle_oauth_callback(provider: str):
     """
     Handle OAuth callback from provider.
+    
+    This endpoint handles the redirect from the OAuth provider after authentication.
+    It processes the response and handles different scenarios:
+    - Successful login/register with redirect_uri: Redirects with authorization code
+    - Successful login/register without redirect_uri: Returns session token
+    - Login with multiple orgs: Returns list of organizations for user to select
+    - Register with no org: Prompts for organization creation/selection
 
     Args:
         provider: Provider type (google, github, microsoft)
 
     Query parameters:
         code: Authorization code from provider
-        state: State parameter
-        error: Error code if auth failed
+        state: State parameter from OAuth flow
+        redirect_uri: Optional redirect URI for OAuth 2.0 Authorization Code flow
+        error: Error code if auth failed at provider
         error_description: Human-readable error description
 
     Returns:
-        200: OAuth flow completed successfully
-        302: Redirect with error
-        400: Validation error or OAuth error
+        302: Redirect with authorization code (if redirect_uri provided)
+        200: OAuth flow completed successfully (JSON response)
+        400: Validation error, OAuth error, or invalid state
+        404: User account not found (for login flows)
+        
+    Response formats (when redirect_uri NOT provided):
+        
+        Success with session:
+        {
+            "token": "session_token",
+            "expires_in": 86400,
+            "token_type": "Bearer",
+            "user": {...}
+        }
+        
+        Requires organization selection (login flow):
+        {
+            "requires_org_selection": true,
+            "user": {...},
+            "available_organizations": [...],
+            "state": "state_token"
+        }
+        
+        Requires organization creation (register flow):
+        {
+            "requires_org_creation": true,
+            "user": {...},
+            "state": "state_token"
+        }
     """
     provider_type = get_provider_type(provider)
 
@@ -618,7 +666,7 @@ def handle_oauth_callback(provider: str):
     error = request.args.get("error")
     error_description = request.args.get("error_description")
 
-    # Get redirect URI from state if available
+    # Get redirect URI from query parameter (for OAuth 2.0 Authorization Code flow)
     redirect_uri = request.args.get("redirect_uri")
 
     try:
@@ -632,7 +680,61 @@ def handle_oauth_callback(provider: str):
         )
 
         if result.get("success"):
-            if result.get("flow_type") == "login":
+            flow_type = result.get("flow_type")
+            
+            # Check if we should redirect with authorization code
+            if redirect_uri and flow_type in ["login", "register"]:
+                # Generate authorization code for external application
+                user_id = result.get("user", {}).get("id")
+                if not user_id:
+                    # For org selection/creation flows, we can't redirect
+                    pass
+                else:
+                    # Determine organization_id
+                    organization_id = result.get("user", {}).get("organization_id")
+                    if not organization_id:
+                        # Can't redirect without organization
+                        pass
+                    else:
+                        # Generate authorization code
+                        auth_code = OAuthFlowService.generate_authorization_code(
+                            user_id=user_id,
+                            client_id="external-app",
+                            redirect_uri=redirect_uri,
+                            scope=["openid", "profile", "email"],
+                            ip_address=request.remote_addr,
+                            user_agent=request.headers.get("User-Agent"),
+                            lifetime_seconds=600,  # 10 minutes
+                        )
+                        
+                        # Mark state as used
+                        state_record = OAuthFlowService.validate_state(state)
+                        if state_record:
+                            state_record.mark_used()
+                        
+                        # Redirect with authorization code
+                        return OAuthFlowService.create_redirect_response(
+                            redirect_uri=redirect_uri,
+                            authorization_code=auth_code,
+                            state=state,
+                        )
+            
+            # Handle login flow responses (no redirect_uri or org selection required)
+            if flow_type == "login":
+                # Check if organization selection is required
+                if result.get("requires_org_selection"):
+                    return api_response(
+                        data={
+                            "requires_org_selection": True,
+                            "user": result["user"],
+                            "available_organizations": result["available_organizations"],
+                            "state": result["state"],
+                        },
+                        message="Please select an organization to continue",
+                        status=200,
+                    )
+                
+                # Normal login with session
                 return api_response(
                     data={
                         "token": result["session"]["token"],
@@ -642,7 +744,22 @@ def handle_oauth_callback(provider: str):
                     },
                     message="Login successful",
                 )
-            elif result.get("flow_type") == "register":
+            
+            # Handle register flow responses
+            elif flow_type == "register":
+                # Check if organization creation is required
+                if result.get("requires_org_creation"):
+                    return api_response(
+                        data={
+                            "requires_org_creation": True,
+                            "user": result["user"],
+                            "state": result["state"],
+                        },
+                        message="Please create or select an organization to continue",
+                        status=200,
+                    )
+                
+                # Normal registration with session
                 return api_response(
                     data={
                         "token": result["session"]["token"],
@@ -652,7 +769,9 @@ def handle_oauth_callback(provider: str):
                     },
                     message="Registration successful",
                 )
-            elif result.get("flow_type") == "link":
+            
+            # Handle link flow responses
+            elif flow_type == "link":
                 return api_response(
                     data={
                         "linked_account": result["linked_account"],
@@ -660,11 +779,262 @@ def handle_oauth_callback(provider: str):
                     message="Account linked successfully",
                 )
 
+        # Fallback for unexpected result format
         return api_response(
             data=result,
             message="OAuth flow completed",
         )
 
+    except OAuthFlowError as e:
+        return api_response(
+            success=False,
+            message=e.message,
+            status=e.status_code,
+            error_type=e.error_type,
+        )
+
+
+@api_v1_bp.route("/auth/external/select-organization", methods=["POST"])
+def select_organization():
+    """
+    Complete OAuth flow by selecting an organization.
+    
+    This endpoint is called after OAuth callback when the user needs to select
+    which organization to log in to (when user belongs to multiple orgs).
+
+    Request body:
+        state: The state token from the OAuth callback
+        organization_id: The selected organization ID
+
+    Returns:
+        200: Session created successfully
+        400: Invalid state or organization
+        404: Organization not found or user not a member
+        
+    Response:
+        {
+            "token": "session_token",
+            "expires_in": 86400,
+            "token_type": "Bearer",
+            "user": {
+                "id": "...",
+                "email": "...",
+                "full_name": "...",
+                "organization_id": "..."
+            }
+        }
+    """
+    data = request.json or {}
+    state_token = data.get("state")
+    organization_id = data.get("organization_id")
+
+    if not state_token:
+        return api_response(
+            success=False,
+            message="state is required",
+            status=400,
+            error_type="VALIDATION_ERROR",
+        )
+
+    if not organization_id:
+        return api_response(
+            success=False,
+            message="organization_id is required",
+            status=400,
+            error_type="VALIDATION_ERROR",
+        )
+
+    try:
+        # Validate state and get OAuth state record
+        state_record = OAuthFlowService.validate_state(state_token)
+        if not state_record or state_record.used:
+            return api_response(
+                success=False,
+                message="Invalid or expired state token",
+                status=400,
+                error_type="INVALID_STATE",
+            )
+
+        # The state should have user information from the OAuth callback
+        # We need to find the user that was authenticated
+        from gatehouse_app.models import User, AuthenticationMethod, Organization, OrganizationMember
+        
+        # Find user by provider authentication
+        # The state record should have provider info in extra_data if set by callback
+        # Otherwise, we need to find the most recently created auth method
+        auth_method = AuthenticationMethod.query.filter_by(
+            method_type=state_record.provider_type,
+        ).order_by(AuthenticationMethod.created_at.desc()).first()
+        
+        if not auth_method:
+            return api_response(
+                success=False,
+                message="Authentication session not found",
+                status=400,
+                error_type="SESSION_NOT_FOUND",
+            )
+
+        user = auth_method.user
+        
+        # Verify user is member of selected organization
+        org = Organization.query.get(organization_id)
+        if not org:
+            return api_response(
+                success=False,
+                message="Organization not found",
+                status=404,
+                error_type="NOT_FOUND",
+            )
+
+        member = OrganizationMember.query.filter_by(
+            user_id=user.id,
+            organization_id=organization_id,
+        ).first()
+
+        if not member:
+            return api_response(
+                success=False,
+                message="You are not a member of this organization",
+                status=403,
+                error_type="FORBIDDEN",
+            )
+
+        # Create session for the selected organization
+        from gatehouse_app.services.session_service import SessionService
+        session = SessionService.create_session(
+            user=user,
+            organization_id=organization_id,
+        )
+
+        # Mark state as used
+        state_record.mark_used()
+
+        # Audit log - login success with org selection
+        AuditService.log_external_auth_login(
+            user_id=user.id,
+            organization_id=organization_id,
+            provider_type=state_record.provider_type.value if isinstance(state_record.provider_type, AuthMethodType) else state_record.provider_type,
+            provider_user_id=auth_method.provider_user_id,
+            auth_method_id=auth_method.id,
+            session_id=session.id,
+        )
+
+        return api_response(
+            data={
+                "token": session.token,
+                "expires_in": session.lifetime_seconds,
+                "token_type": "Bearer",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "organization_id": organization_id,
+                },
+            },
+            message="Organization selected and session created successfully",
+        )
+
+    except Exception as e:
+        logger.error(f"Error in select_organization: {str(e)}", exc_info=True)
+        return api_response(
+            success=False,
+            message="An error occurred while selecting organization",
+            status=500,
+            error_type="INTERNAL_ERROR",
+        )
+
+
+# =============================================================================
+# Authorization Code Exchange Endpoint
+# =============================================================================
+
+@api_v1_bp.route("/auth/external/token", methods=["POST"])
+def exchange_authorization_code():
+    """
+    Exchange an authorization code for a session token.
+    
+    This endpoint is used by external applications (like oauth2-proxy, BookStack)
+    to exchange the authorization code received from the OAuth callback for a
+    session token.
+    
+    Request body (form-encoded or JSON):
+        grant_type: Must be "authorization_code"
+        code: The authorization code from the callback
+        redirect_uri: The redirect URI used in the original request
+        client_id: The client ID (optional, defaults to "external-app")
+    
+    Returns:
+        200: Session token exchanged successfully
+        400: Invalid or expired authorization code
+        404: User not found
+        
+    Response:
+        {
+            "token": "session_token",
+            "expires_in": 86400,
+            "token_type": "Bearer",
+            "user": {
+                "id": "...",
+                "email": "...",
+                "full_name": "...",
+                "organization_id": "..."
+            }
+        }
+    """
+    # Support both JSON and form-encoded requests
+    if request.is_json:
+        data = request.json or {}
+    else:
+        data = request.form or {}
+    
+    grant_type = data.get("grant_type")
+    code = data.get("code")
+    redirect_uri = data.get("redirect_uri")
+    client_id = data.get("client_id", "external-app")
+    
+    # Validate required parameters
+    if grant_type and grant_type != "authorization_code":
+        return api_response(
+            success=False,
+            message="Invalid grant_type. Must be 'authorization_code'",
+            status=400,
+            error_type="INVALID_GRANT_TYPE",
+        )
+    
+    if not code:
+        return api_response(
+            success=False,
+            message="code is required",
+            status=400,
+            error_type="VALIDATION_ERROR",
+        )
+    
+    if not redirect_uri:
+        return api_response(
+            success=False,
+            message="redirect_uri is required",
+            status=400,
+            error_type="VALIDATION_ERROR",
+        )
+    
+    try:
+        result = OAuthFlowService.exchange_authorization_code(
+            code=code,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            ip_address=request.remote_addr,
+        )
+        
+        return api_response(
+            data={
+                "token": result["token"],
+                "expires_in": result["expires_in"],
+                "token_type": result["token_type"],
+                "user": result["user"],
+            },
+            message="Token exchanged successfully",
+        )
+        
     except OAuthFlowError as e:
         return api_response(
             success=False,

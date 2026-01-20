@@ -3,7 +3,12 @@ from gatehouse_app.models.base import BaseModel
 from gatehouse_app.models.user import User
 from gatehouse_app.models.organization import Organization
 from gatehouse_app.models.organization_member import OrganizationMember
-from gatehouse_app.models.authentication_method import AuthenticationMethod
+from gatehouse_app.models.authentication_method import (
+    AuthenticationMethod,
+    ApplicationProviderConfig,
+    OrganizationProviderOverride,
+    OAuthState,
+)
 from gatehouse_app.models.session import Session
 from gatehouse_app.models.audit_log import AuditLog
 from gatehouse_app.models.oidc_client import OIDCClient
@@ -22,6 +27,9 @@ __all__ = [
     "Organization",
     "OrganizationMember",
     "AuthenticationMethod",
+    "ApplicationProviderConfig",
+    "OrganizationProviderOverride",
+    "OAuthState",
     "Session",
     "AuditLog",
     "OIDCClient",
